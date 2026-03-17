@@ -9,9 +9,10 @@ bun install              # Install dependencies
 bun run src/index.ts     # Run CLI during development
 bun run lint             # Biome check (format, imports, lint)
 bun run typecheck        # TypeScript strict type check
+bun test                 # Run all tests
 ```
 
-No tests. Type checking and linting are the verification steps — run both after every change.
+Type checking, linting, and tests are the verification steps — run all three after every change.
 
 After every change: rebuild and relink (`bun install && bun link`), then run `p <command>` to verify end-to-end.
 

@@ -150,3 +150,24 @@ export async function closeDatabase(): Promise<void> {
     _rawDb = null;
   }
 }
+
+/** @internal Test-only: replace the singleton with an in-memory database. */
+export function _resetForTesting(migrationsDir: string): { db: Kysely<DB>; rawDb: Database } {
+  if (_db) {
+    void _db.destroy();
+    _db = null;
+  }
+  if (_rawDb) {
+    _rawDb.close();
+    _rawDb = null;
+  }
+  const rawDb = new Database(":memory:");
+  rawDb.run("PRAGMA journal_mode=WAL");
+  runMigrationsFromDir(rawDb, migrationsDir);
+  if (tableExists(rawDb, "systems")) {
+    ensureSystemId(rawDb);
+  }
+  _rawDb = rawDb;
+  _db = new Kysely<DB>({ dialect: new BunSqliteDialect({ database: rawDb }) });
+  return { db: _db, rawDb };
+}

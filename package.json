@@ -10,7 +10,8 @@
     "dev": "bun run src/index.ts",
     "lint": "bunx biome check .",
     "lint:fix": "bunx biome check --write .",
-    "typecheck": "bun x tsc --noEmit"
+    "typecheck": "bun x tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@uln/cmd": "file:../../ulnd/lib/packages/cmd",
