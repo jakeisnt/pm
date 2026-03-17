@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { Command } from "commander";
+import { Command } from "@uln/cmd";
 import { disableAbort, enableAbort } from "./lib/abort.ts";
 import { SelectionCancelledError } from "./lib/prompt.ts";
 

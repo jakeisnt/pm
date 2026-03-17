@@ -14,6 +14,7 @@ import {
 import { findProjects } from "./find-projects.ts";
 import { fuzzySelectProject } from "./fuzzy.ts";
 import { forceReindex, indexGithubRepos } from "./indexer.ts";
+import { log } from "./log.ts";
 import { runCmd, spawnShell } from "./subprocess.ts";
 
 export async function runProjectSelect(
@@ -78,7 +79,6 @@ export async function runProjectSelect(
       }
     }
     if (!selected) {
-      const { log } = await import("./log.ts");
       log.warn(`No project matching "${options.name}" found. Falling back to fuzzy select.`);
     }
   }

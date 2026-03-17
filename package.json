@@ -13,14 +13,13 @@
     "typecheck": "bun x tsc --noEmit"
   },
   "dependencies": {
+    "@uln/cmd": "file:../../ulnd/lib/packages/cmd",
     "@uln/env": "file:../../ulnd/lib/packages/env",
     "@uln/log": "file:../../ulnd/lib/packages/log",
     "@uln/repo": "file:../../ulnd/lib/packages/repo",
-    "commander": "^14.0.3",
     "kysely": "^0.28.11",
     "kysely-bun-sqlite": "^0.4.0",
     "nanospinner": "^1.2.2",
-    "octokit": "^5.0.5",
     "picocolors": "^1.1.1",
     "zod": "^4.3.6"
   },

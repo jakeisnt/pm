@@ -1,18 +1,15 @@
-import pc from "picocolors";
+import { log, sym, theme } from "@uln/log";
 
-function write(s: string): void {
-  process.stderr.write(`${s}\n`);
-}
+// Route all log output to stderr so stdout stays clean for programmatic use.
+// raw() still goes to stdout via the write channel — callers needing stdout
+// should use process.stdout.write() directly.
+log.setOutput({
+  write: (msg: string) => {
+    process.stderr.write(`${msg}\n`);
+  },
+  writeError: (msg: string) => {
+    process.stderr.write(`${msg}\n`);
+  },
+});
 
-export const log = {
-  phase: (msg: string) => write(`  ${pc.bold(msg)}`),
-  item: (msg: string) => write(`  ${msg}`),
-  detail: (msg: string) => write(`    ${msg}`),
-  success: (msg: string) => write(`  ${pc.green("✓")} ${msg}`),
-  warn: (msg: string) => write(`  ${pc.yellow("⚠")} ${msg}`),
-  fail: (msg: string) => write(`  ${pc.red("✗")} ${msg}`),
-  dim: (msg: string) => write(`  ${pc.dim(msg)}`),
-  blank: () => write(""),
-  raw: (msg: string) => process.stdout.write(`${msg}\n`),
-  info: (msg: string) => write(`  ${pc.blue("ℹ")} ${msg}`),
-};
+export { log, sym, theme };

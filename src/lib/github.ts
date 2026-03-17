@@ -1,23 +1,23 @@
+import type { ExecResult } from "@uln/cmd";
+import { exec } from "@uln/cmd";
 import { checkAbort } from "./abort.ts";
-import type { RunResult } from "./subprocess.ts";
-import { run } from "./subprocess.ts";
 
-export type { RunResult };
+export type RunResult = ExecResult;
 
-export function git(args: string[], cwd?: string): RunResult {
-  return run(["git", ...args], cwd ? { cwd } : undefined);
+export function git(args: string[], cwd?: string): ExecResult {
+  return exec(["git", ...args], cwd ? { cwd } : undefined);
 }
 
-export function gh(args: string[], cwd?: string): RunResult {
-  return run(["gh", ...args], cwd ? { cwd } : undefined);
+export function gh(args: string[], cwd?: string): ExecResult {
+  return exec(["gh", ...args], cwd ? { cwd } : undefined);
 }
 
-export function gitAbortable(args: string[], cwd?: string): RunResult {
+export function gitAbortable(args: string[], cwd?: string): ExecResult {
   checkAbort();
   return git(args, cwd);
 }
 
-export function ghAbortable(args: string[], cwd?: string): RunResult {
+export function ghAbortable(args: string[], cwd?: string): ExecResult {
   checkAbort();
   return gh(args, cwd);
 }

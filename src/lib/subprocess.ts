@@ -1,27 +1,11 @@
+import type { ExecResult } from "@uln/cmd";
+import { exec } from "@uln/cmd";
 import { checkAbort, trackProcess } from "./abort.ts";
 import { getShell } from "./env.ts";
 
-export interface RunResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
+export type RunResult = ExecResult;
 
-export function run(cmd: string[], opts?: { cwd?: string }): RunResult {
-  const spawnOpts: { stdout: "pipe"; stderr: "pipe"; cwd?: string } = {
-    stdout: "pipe",
-    stderr: "pipe",
-  };
-  if (opts?.cwd) spawnOpts.cwd = opts.cwd;
-  const result = Bun.spawnSync(cmd, spawnOpts);
-  return {
-    ok: result.exitCode === 0,
-    stdout: result.stdout.toString().trim(),
-    stderr: result.stderr.toString().trim(),
-    exitCode: result.exitCode,
-  };
-}
+export { exec as run };
 
 export function runCmd(
   cmd: string,
@@ -64,9 +48,9 @@ export async function runCmdAsync(
   return exitCode;
 }
 
-export function runAbortable(cmd: string[], opts: { cwd?: string } = {}): RunResult {
+export function runAbortable(cmd: string[], opts: { cwd?: string } = {}): ExecResult {
   checkAbort();
-  return run(cmd, opts);
+  return exec(cmd, opts);
 }
 
 export function spawnShell(cwd: string): number {
