@@ -63,7 +63,7 @@ function ProjectItem({ project }: { project: Project }) {
         <ActionPanel>
           {isLocal && (
             <>
-              <Action.Open title="Open in Terminal" target={project.path} application="Terminal" />
+              <Action.Open title="Open in Terminal" target={project.path} application="Ghostty" />
               <Action.Open title="Open in VS Code" target={project.path} application="Visual Studio Code" />
               <Action.Open title="Open in Finder" target={project.path} application="Finder" />
             </>
