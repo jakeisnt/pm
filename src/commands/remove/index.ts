@@ -49,7 +49,7 @@ export async function runProjectRemove(pathArg?: string, opts?: { force?: boolea
 
   if (!opts?.force) {
     const prompt = deleteFromDisk
-      ? `\nThis will ${pc.red("permanently delete")} the project from disk and remove it from the index. Continue? [y/N] `
+      ? `\nThis will ${pc.red("permanently delete")} the project from disk. The project will remain in the index. Continue? [y/N] `
       : `\nThis will remove the project from the index. Continue? [y/N] `;
     const answer = await askLine(prompt);
     if (answer.toLowerCase() !== "y") {
@@ -58,19 +58,19 @@ export async function runProjectRemove(pathArg?: string, opts?: { force?: boolea
     }
   }
 
-  const removed = await removeProject(target);
-  if (removed) {
-    log.success(`Untracked ${pc.cyan(projectName)}`);
-  } else {
-    log.dim("No project record found; nothing was removed from the index.");
-  }
-
   if (deleteFromDisk) {
     if (existsSync(target)) {
       await rm(target, { recursive: true });
       log.success(`Deleted ${pc.cyan(target)} from disk`);
     } else {
       log.dim("Directory does not exist on disk; nothing to delete.");
+    }
+  } else {
+    const removed = await removeProject(target);
+    if (removed) {
+      log.success(`Untracked ${pc.cyan(projectName)}`);
+    } else {
+      log.dim("No project record found; nothing was removed from the index.");
     }
   }
 }
