@@ -1,5 +1,5 @@
+import { getSearchDepth, getSearchRoots } from "../lib/config/index.ts";
 import { runProjectSelect } from "../lib/project-select.ts";
-import { getSearchDepth, getSearchRoots } from "../lib/settings.ts";
 import type { SelectOptions } from "../types.ts";
 
 export async function runSelect(

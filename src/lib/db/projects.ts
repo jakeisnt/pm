@@ -1,5 +1,5 @@
 import type { Project } from "../../types.ts";
-import { getGithubReindexInterval, getReindexInterval } from "../settings.ts";
+import { getGithubReindexInterval, getReindexInterval } from "../config/index.ts";
 import { getDb } from "./database.ts";
 import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";

@@ -1,4 +1,10 @@
-import { env } from "./env-schema.ts";
+import { createEnv } from "@uln/env";
+import { z } from "zod";
+
+export const env = createEnv({
+  SHELL: { schema: z.string(), fallback: "/bin/bash" },
+  EDITOR: { schema: z.string(), fallback: "cursor" },
+});
 
 /** User's default shell, falls back to /bin/bash. */
 export function getShell(): string {

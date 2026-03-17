@@ -1,6 +1,6 @@
 import { sql } from "kysely";
 import type { RecentEntry } from "../../types.ts";
-import { getMaxRecent } from "../settings.ts";
+import { getMaxRecent } from "../config/index.ts";
 import { getDb } from "./database.ts";
 import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";

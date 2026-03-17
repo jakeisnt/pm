@@ -1,7 +1,7 @@
 import type { ExecResult } from "@uln/cmd";
 import { exec, execInherit, execInheritAsync, execShell } from "@uln/cmd";
 import { checkAbort, trackProcess } from "./abort.ts";
-import { getShell } from "./env.ts";
+import { getShell } from "./config/index.ts";
 
 export type RunResult = ExecResult;
 

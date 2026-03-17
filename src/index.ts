@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "@uln/cmd";
 import { disableAbort, enableAbort } from "./lib/abort.ts";
-import { loadConfig } from "./lib/config.ts";
+import { loadConfig } from "./lib/config/index.ts";
 import { runShellHook } from "./lib/hooks.ts";
 import { SelectionCancelledError } from "./lib/prompt.ts";
 

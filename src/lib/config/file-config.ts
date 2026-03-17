@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_ON_ERROR, DEFAULT_ON_MISSING_COMMAND } from "./constants.ts";
+import { DEFAULT_ON_ERROR, DEFAULT_ON_MISSING_COMMAND } from "./defaults.ts";
 
 interface PmConfig {
   onMissingCommand: string;
   onError: string;
 }
 
-const CONFIG_PATH = join(import.meta.dirname, "../../config.json");
+const CONFIG_PATH = join(import.meta.dirname, "../../../config.json");
 
 let cached: PmConfig | undefined;
 

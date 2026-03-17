@@ -1,11 +1,11 @@
+import { getSetting } from "../db/settings.ts";
 import {
   DEFAULT_DEPTH,
   DEFAULT_ROOTS,
   GITHUB_REINDEX_INTERVAL_MS,
   MAX_RECENT,
   REINDEX_INTERVAL_MS,
-} from "./constants.ts";
-import { getSetting } from "./db/index.ts";
+} from "./defaults.ts";
 
 export interface SettingDef {
   description: string;
