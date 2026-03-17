@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Action, ActionPanel, Icon, List } from "@raycast/api";
+import { Action, ActionPanel, Icon, List, Toast, open, showToast } from "@raycast/api";
 import { useExec } from "@raycast/utils";
 
 interface Project {
@@ -69,7 +69,31 @@ function ProjectItem({ project }: { project: Project }) {
             </>
           )}
           {!isLocal && project.githubFullName && (
-            <Action.OpenInBrowser title="Open on GitHub" url={`https://github.com/${project.githubFullName}`} />
+            <>
+              <Action
+                title="Clone and Open in Terminal"
+                icon={Icon.Terminal}
+                onAction={async () => {
+                  const fullName = project.githubFullName as string;
+                  await showToast({ style: Toast.Style.Animated, title: `Cloning ${fullName}…` });
+                  try {
+                    const clonedPath = execSync(`${BUN_BIN} run ${P_BIN} ${JSON.stringify(fullName)} --path`, {
+                      encoding: "utf-8",
+                      timeout: 120_000,
+                    }).trim();
+                    await showToast({ style: Toast.Style.Success, title: "Cloned", message: fullName });
+                    await open(clonedPath, "Ghostty");
+                  } catch (err) {
+                    await showToast({
+                      style: Toast.Style.Failure,
+                      title: "Clone failed",
+                      message: err instanceof Error ? err.message : String(err),
+                    });
+                  }
+                }}
+              />
+              <Action.OpenInBrowser title="Open on GitHub" url={`https://github.com/${project.githubFullName}`} />
+            </>
           )}
           <Action.CopyToClipboard title="Copy Path" content={project.path} />
           {isLocal && (
