@@ -1,13 +1,8 @@
-import { hostname } from "node:os";
 import { getRawDb } from "./database.ts";
-import { getCurrentSystemId } from "./systems.ts";
-
-export function getDeviceName(): string {
-  return hostname().split(".")[0] ?? hostname();
-}
+import { getCurrentSystemId, getCurrentSystemName } from "./systems.ts";
 
 function deviceKey(key: string): string {
-  return `${getDeviceName()}:${key}`;
+  return `${getCurrentSystemName()}:${key}`;
 }
 
 export function getSetting(key: string): string | undefined {
@@ -47,7 +42,7 @@ export function getAllSettings(): Record<string, string> {
     key: string;
     value: string;
   }[];
-  const device = getDeviceName();
+  const device = getCurrentSystemName();
   const result: Record<string, string> = {};
   for (const row of rows) {
     if (!row.key.includes(":")) {

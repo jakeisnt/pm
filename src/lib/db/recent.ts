@@ -4,7 +4,6 @@ import { getMaxRecent } from "../settings.ts";
 import { getDb } from "./database.ts";
 import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";
-import { generateId } from "./uuid.ts";
 
 export async function getRecentProjects(): Promise<RecentEntry[]> {
   const latestHistory = getDb()
@@ -44,7 +43,7 @@ export async function touchRecentProject(path: string, name: string, openedAt = 
     await db
       .insertInto("projects")
       .values({
-        id: generateId(),
+        id: crypto.randomUUID(),
         path,
         name,
         last_scanned: openedAt,
@@ -68,6 +67,6 @@ export async function touchRecentProject(path: string, name: string, openedAt = 
 
   await db
     .insertInto("project_history")
-    .values({ id: generateId(), project_id: project.id, opened_at: openedAt, system_id: systemId })
+    .values({ id: crypto.randomUUID(), project_id: project.id, opened_at: openedAt, system_id: systemId })
     .execute();
 }

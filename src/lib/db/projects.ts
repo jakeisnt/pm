@@ -3,7 +3,6 @@ import { getGithubReindexInterval, getReindexInterval } from "../settings.ts";
 import { getDb } from "./database.ts";
 import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";
-import { generateId } from "./uuid.ts";
 
 export interface DevConfig {
   projectPath: string;
@@ -106,7 +105,7 @@ export async function upsertProjects(projects: Project[]): Promise<void> {
       if (p.githubFullName) inferOpts.githubFullName = p.githubFullName;
       const scope = p.scope ?? inferProjectScope(inferOpts);
       return {
-        id: generateId(),
+        id: crypto.randomUUID(),
         path: p.path,
         name: p.name,
         last_scanned: now,
@@ -175,7 +174,7 @@ export async function promoteToLocal(githubFullName: string, localPath: string):
   await db
     .insertInto("projects")
     .values({
-      id: generateId(),
+      id: crypto.randomUUID(),
       path: localPath,
       name: githubFullName.split("/").pop() ?? githubFullName,
       last_scanned: now,
