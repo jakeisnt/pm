@@ -6,7 +6,7 @@ import { BunSqliteDialect } from "kysely-bun-sqlite";
 import { createSpinner } from "nanospinner";
 import { getDbPath } from "../paths.ts";
 import type { DB } from "./schema.ts";
-import { ensureSystemId } from "./system-tag.ts";
+import { ensureSystemId } from "./systems.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "..", "migrations");
 

@@ -76,7 +76,7 @@ export function enableAbort() {
   });
 }
 
-/** Temporarily suspend abort handling (e.g. while fzf owns the terminal). */
+/** Temporarily suspend abort handling (e.g. while the fuzzy selector owns the terminal). */
 export function suspendAbort(): () => void {
   suspended = true;
   try {

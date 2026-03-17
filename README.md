@@ -24,7 +24,7 @@ The CLI is available as `p`.
 ## Usage
 
 ```bash
-# Interactive project switcher (fuzzy search via fzf)
+# Interactive project switcher (builtin fuzzy search)
 p
 
 # List all projects
@@ -66,7 +66,6 @@ p config set work_path_prefixes "/home/user/work,/Users/user/company"
 ## Requirements
 
 - [Bun](https://bun.sh) runtime
-- [fzf](https://github.com/junegunn/fzf) for interactive selection
 - [gh](https://cli.github.com/) CLI for GitHub integration (optional)
 
 ## License

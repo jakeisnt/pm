@@ -28,9 +28,7 @@ export {
   deleteSetting,
   getAllSettings,
   getAllSettingsRaw,
-  getDeviceName,
   getSetting,
   setSetting,
 } from "./settings.ts";
-export { getCurrentSystemId, getCurrentSystemNameDb, listSystems } from "./systems.ts";
-export { generateId, shortId } from "./uuid.ts";
+export { getCurrentSystemId, getCurrentSystemName, listSystems } from "./systems.ts";
