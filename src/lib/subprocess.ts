@@ -1,5 +1,5 @@
 import type { ExecResult } from "@uln/cmd";
-import { exec } from "@uln/cmd";
+import { exec, execInherit, execInheritAsync, execShell } from "@uln/cmd";
 import { checkAbort, trackProcess } from "./abort.ts";
 import { getShell } from "./env.ts";
 
@@ -7,22 +7,25 @@ export type RunResult = ExecResult;
 
 export { exec as run };
 
+function mergeEnv(extra: Record<string, string | undefined>): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) merged[k] = v;
+  }
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined) merged[k] = v;
+  }
+  return merged;
+}
+
 export function runCmd(
   cmd: string,
   args: string[],
   cwd: string,
   opts?: { env?: Record<string, string | undefined> },
 ): number {
-  const env = opts?.env ? { ...process.env, ...opts.env } : undefined;
-  const spawnOpts: Parameters<typeof Bun.spawnSync>[1] = {
-    cwd,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  };
-  if (env) spawnOpts.env = env;
-  const result = Bun.spawnSync([cmd, ...args], spawnOpts);
-  return result.exitCode;
+  const env = opts?.env ? mergeEnv(opts.env) : undefined;
+  return execInherit([cmd, ...args], { cwd, env });
 }
 
 export async function runCmdAsync(
@@ -31,21 +34,12 @@ export async function runCmdAsync(
   cwd: string,
   opts?: { env?: Record<string, string | undefined> },
 ): Promise<number> {
-  const env = opts?.env ? { ...process.env, ...opts.env } : undefined;
-  const spawnOpts: Parameters<typeof Bun.spawn>[1] = {
+  const env = opts?.env ? mergeEnv(opts.env) : undefined;
+  return execInheritAsync([cmd, ...args], {
     cwd,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  };
-  if (env) spawnOpts.env = env;
-  const proc = Bun.spawn([cmd, ...args], spawnOpts);
-
-  trackProcess(proc);
-  const exitCode = await proc.exited;
-  trackProcess(null);
-
-  return exitCode;
+    env,
+    onProcess: (proc) => trackProcess(proc),
+  });
 }
 
 export function runAbortable(cmd: string[], opts: { cwd?: string } = {}): ExecResult {
@@ -54,12 +48,5 @@ export function runAbortable(cmd: string[], opts: { cwd?: string } = {}): ExecRe
 }
 
 export function spawnShell(cwd: string): number {
-  const shell = getShell();
-  const result = Bun.spawnSync([shell], {
-    cwd,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  return result.exitCode;
+  return execShell(cwd, getShell());
 }
