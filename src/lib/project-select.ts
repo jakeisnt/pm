@@ -13,10 +13,25 @@ import {
   upsertProject,
 } from "./db/index.ts";
 import { findProjects } from "./find-projects.ts";
-import { fuzzySelectProject } from "./fuzzy.ts";
 import { forceReindex, indexGithubRepos } from "./indexer.ts";
 import { log } from "./log.ts";
+import { fzfSelect } from "./prompt.ts";
 import { runCmd, spawnShell } from "./subprocess.ts";
+
+function formatProject(p: Project): string {
+  if (p.source === "github") {
+    return `\x1b[36m☁\x1b[0m ${p.githubFullName || p.name}`;
+  }
+  return `\x1b[32m●\x1b[0m ${p.name} \x1b[2m(${p.path})\x1b[0m`;
+}
+
+export async function fuzzySelectProject(projects: Project[]): Promise<Project> {
+  return fzfSelect(projects, {
+    format: (p) => formatProject(p),
+    searchKey: (p) => p.name,
+    noMatchError: "No projects found",
+  });
+}
 
 export async function runProjectSelect(
   roots: string[],

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import type { ExecResult } from "@uln/cmd";
 import { exec, execInherit, execInheritAsync, execShell } from "@uln/cmd";
 import { checkAbort, trackProcess } from "./abort.ts";
@@ -49,4 +50,13 @@ export function runAbortable(cmd: string[], opts: { cwd?: string } = {}): ExecRe
 
 export function spawnShell(cwd: string): number {
   return execShell(cwd, getShell());
+}
+
+/** Run a shell hook command with extra environment variables. */
+export function runShellHook(command: string, env: Record<string, string>): void {
+  const shell = getShell();
+  spawnSync(shell, ["-c", command], {
+    stdio: "inherit",
+    env: { ...process.env, ...env },
+  });
 }

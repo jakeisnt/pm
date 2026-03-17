@@ -16,6 +16,8 @@ export {
   ESC_DISAMBIGUATE_MS,
   EXIT_ABORT,
   GH_REPO_LIST_LIMIT,
+  getAppDir,
+  getDbPath,
 } from "./defaults.ts";
 
 // Environment variables

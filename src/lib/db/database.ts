@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Kysely } from "kysely";
 import { BunSqliteDialect } from "kysely-bun-sqlite";
 import { createSpinner } from "nanospinner";
-import { getDbPath } from "../paths.ts";
+import { getDbPath } from "../config/index.ts";
 import type { DB } from "./schema.ts";
 import { ensureSystemId } from "./systems.ts";
 

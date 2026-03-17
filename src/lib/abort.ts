@@ -1,5 +1,6 @@
 import { ESC_DISAMBIGUATE_MS, EXIT_ABORT } from "./config/index.ts";
-import { isInteractive } from "./terminal.ts";
+
+const isInteractive = (): boolean => Boolean(process.stdin.isTTY);
 
 let aborted = false;
 let activeProc: { kill(sig?: number | string): void } | null = null;
