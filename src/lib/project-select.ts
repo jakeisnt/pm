@@ -42,10 +42,8 @@ export async function runProjectSelect(
     return "";
   }
 
-  // Reindex in background
-  forceReindex(config).catch(() => {});
-  indexGithubRepos().catch(() => {});
-
+  // Load cached projects first — reindex happens after selection to avoid
+  // blocking on the synchronous filesystem walk in findProjects()
   let localProjects = await getCachedProjects("local");
   if (localProjects.length === 0) {
     localProjects = findProjects(config).map((p) => ({ ...p, source: "local" as const }));
@@ -122,6 +120,12 @@ export async function runProjectSelect(
   } else {
     spawnShell(targetPath);
   }
+
+  // Reindex in background after selection — forceReindex uses sync FS APIs
+  // (readdirSync/readFileSync) which block the event loop before the first await,
+  // so calling it before selection would delay fzf from appearing.
+  forceReindex(config).catch(() => {});
+  indexGithubRepos().catch(() => {});
 
   return targetPath;
 }

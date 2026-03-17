@@ -83,17 +83,20 @@ export async function getCachedProjects(source?: "local" | "github"): Promise<Pr
 }
 
 export async function upsertProjects(projects: Project[]): Promise<void> {
+  if (projects.length === 0) return;
   const { inferProjectScope } = await import("../scope.ts");
   const db = getDb();
   const now = Date.now();
   const systemId = getCurrentSystemId();
-  for (const p of projects) {
-    const inferOpts: { githubFullName?: string; path?: string } = { path: p.path };
-    if (p.githubFullName) inferOpts.githubFullName = p.githubFullName;
-    const scope = p.scope ?? inferProjectScope(inferOpts);
-    await db
-      .insertInto("projects")
-      .values({
+
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < projects.length; i += BATCH_SIZE) {
+    const batch = projects.slice(i, i + BATCH_SIZE);
+    const values = batch.map((p) => {
+      const inferOpts: { githubFullName?: string; path?: string } = { path: p.path };
+      if (p.githubFullName) inferOpts.githubFullName = p.githubFullName;
+      const scope = p.scope ?? inferProjectScope(inferOpts);
+      return {
         id: generateId(),
         path: p.path,
         name: p.name,
@@ -104,14 +107,18 @@ export async function upsertProjects(projects: Project[]): Promise<void> {
         github_full_name: p.githubFullName || null,
         scope,
         system_id: systemId,
-      })
+      };
+    });
+    await db
+      .insertInto("projects")
+      .values(values)
       .onConflict((oc) =>
         oc.column("path").doUpdateSet({
-          name: p.name,
+          name: (eb) => eb.ref("excluded.name"),
           last_scanned: now,
-          source: p.source || "local",
-          github_full_name: p.githubFullName || null,
-          scope,
+          source: (eb) => eb.ref("excluded.source"),
+          github_full_name: (eb) => eb.ref("excluded.github_full_name"),
+          scope: (eb) => eb.ref("excluded.scope"),
         }),
       )
       .execute();
