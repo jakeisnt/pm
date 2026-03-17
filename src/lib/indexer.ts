@@ -1,6 +1,6 @@
 import { fetchGithubRepos, getOctokit, toGithubPlaceholder } from "@uln/repo";
 import type { RootsConfig } from "../types.ts";
-import { GH_REPO_LIST_LIMIT } from "./constants.ts";
+import { GH_REPO_LIST_LIMIT } from "./config/index.ts";
 import { cleanupNotOnGithub, getDb, needsGithubReindex, needsReindex, upsertProjects } from "./db/index.ts";
 import { findProjects } from "./find-projects.ts";
 

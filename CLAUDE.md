@@ -25,11 +25,13 @@ After every change: rebuild and relink (`bun install && bun link`), then run `p 
 
 ## Key Conventions
 
-### Constants
-All config values, limits, timeouts, and tunables go in `src/lib/constants.ts`.
+### Configuration
+All configuration lives in `src/lib/config/` with a single barrel export (`index.ts`):
+- `defaults.ts` — hardcoded constants (intervals, limits, paths, hook defaults)
+- `env.ts` — Zod-validated environment variables (SHELL, EDITOR) + getter functions
+- `config-file.ts` — reads `config.json` with hardcoded fallbacks for all user-facing settings
 
-### Environment Variables
-Never use `process.env` directly. All env vars are defined in `src/lib/env-schema.ts` with Zod validation.
+No settings in the database. User-configurable values go in `config.json`, everything else is a hardcoded default in `defaults.ts`. Import from `src/lib/config/index.ts`. Never use `process.env` directly.
 
 ### Subprocess Execution
 All subprocess calls go through `src/lib/subprocess.ts` (`run()`). No direct `Bun.spawnSync()`.

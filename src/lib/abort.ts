@@ -1,4 +1,4 @@
-import { ESC_DISAMBIGUATE_MS, EXIT_ABORT } from "./constants.ts";
+import { ESC_DISAMBIGUATE_MS, EXIT_ABORT } from "./config/index.ts";
 import { isInteractive } from "./terminal.ts";
 
 let aborted = false;

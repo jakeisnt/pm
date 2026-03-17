@@ -1,6 +1,6 @@
 import { sql } from "kysely";
 import type { RecentEntry } from "../../types.ts";
-import { getMaxRecent } from "../settings.ts";
+import { loadConfig } from "../config/index.ts";
 import { getDb } from "./database.ts";
 import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";
@@ -22,7 +22,7 @@ export async function getRecentProjects(): Promise<RecentEntry[]> {
     .where("orgs.hidden", "=", 0)
     .where("orgs.deleted_at", "is", null)
     .orderBy("latest_history.last_opened", "desc")
-    .limit(getMaxRecent())
+    .limit(loadConfig().maxRecent)
     .execute();
   return rows.map((r) => ({ path: r.path, name: r.name, lastOpened: r.last_opened }));
 }

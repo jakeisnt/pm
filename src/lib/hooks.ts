@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { getShell } from "./env.ts";
+import { getShell } from "./config/index.ts";
 
 /** Run a shell hook command with extra environment variables. */
 export const runShellHook = (command: string, env: Record<string, string>): void => {

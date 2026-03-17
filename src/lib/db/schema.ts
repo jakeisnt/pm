@@ -8,15 +8,6 @@ export interface SystemsTable {
   deleted_at: number | null;
 }
 
-export interface SettingsTable {
-  key: string;
-  value: string;
-  created_at: Generated<number>;
-  updated_at: Generated<number>;
-  deleted_at: number | null;
-  system_id: string;
-}
-
 export interface ProjectTable {
   id: string;
   path: string;
@@ -66,7 +57,6 @@ export interface OrgsTable {
 
 export interface DB {
   systems: SystemsTable;
-  settings: SettingsTable;
   projects: ProjectTable;
   project_history: ProjectHistoryTable;
   project_dev_config: ProjectDevConfigTable;
