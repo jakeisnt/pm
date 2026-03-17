@@ -126,7 +126,7 @@ export async function runProjectSelect(
 
   // Reindex in background after selection — forceReindex uses sync FS APIs
   // (readdirSync/readFileSync) which block the event loop before the first await,
-  // so calling it before selection would delay fzf from appearing.
+  // so calling it before selection would delay the selector from appearing.
   forceReindex(config).catch(() => {});
   indexGithubRepos().catch(() => {});
 
