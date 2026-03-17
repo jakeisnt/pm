@@ -1,0 +1,34 @@
+// ─── Database module public API ─────────────────────────────────────────
+//
+// External code should import from this file only.
+
+export { closeDatabase, getDb, getRawDb, runMigrationsFromDir } from "./database.ts";
+export type { DevConfig } from "./projects.ts";
+export {
+  cleanupMissing,
+  getCachedProjects,
+  getDevConfig,
+  getLocalProjectByGithubName,
+  getProjectsCount,
+  needsGithubReindex,
+  needsReindex,
+  promoteToLocal,
+  removeProject,
+  touchProject,
+  upsertDevConfig,
+  upsertProject,
+  upsertProjects,
+} from "./projects.ts";
+export { getRecentProjects, touchRecentProject } from "./recent.ts";
+export type { DB } from "./schema.ts";
+export {
+  deleteAllSettings,
+  deleteSetting,
+  getAllSettings,
+  getAllSettingsRaw,
+  getDeviceName,
+  getSetting,
+  setSetting,
+} from "./settings.ts";
+export { getCurrentSystemId, getCurrentSystemNameDb, listSystems } from "./systems.ts";
+export { generateId, shortId } from "./uuid.ts";
