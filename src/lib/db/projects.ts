@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import type { Project } from "../../types.ts";
 import { getGithubReindexInterval, getReindexInterval } from "../settings.ts";
 import { getDb } from "./database.ts";
@@ -208,16 +207,16 @@ export async function promoteToLocal(githubFullName: string, localPath: string):
     .execute();
 }
 
-export async function cleanupMissing(): Promise<void> {
+export async function cleanupNotOnGithub(githubFullNames: Set<string>): Promise<void> {
   const db = getDb();
   const now = Date.now();
   const rows = await db
     .selectFrom("projects")
-    .select(["id", "path"])
-    .where("source", "=", "local")
+    .select(["id", "github_full_name"])
     .where("deleted_at", "is", null)
+    .where("github_full_name", "is not", null)
     .execute();
-  const toDelete = rows.filter((r) => !existsSync(r.path));
+  const toDelete = rows.filter((r) => !githubFullNames.has(r.github_full_name as string));
   if (toDelete.length === 0) return;
   for (const project of toDelete) {
     await db

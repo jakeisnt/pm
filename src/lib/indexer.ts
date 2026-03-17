@@ -1,7 +1,7 @@
 import { fetchGithubRepos, getOctokit, toGithubPlaceholder } from "@uln/repo";
 import type { RootsConfig } from "../types.ts";
 import { GH_REPO_LIST_LIMIT } from "./constants.ts";
-import { cleanupMissing, getDb, needsGithubReindex, needsReindex, upsertProjects } from "./db/index.ts";
+import { cleanupNotOnGithub, getDb, needsGithubReindex, needsReindex, upsertProjects } from "./db/index.ts";
 import { findProjects } from "./find-projects.ts";
 
 export async function runIndexing(config: RootsConfig): Promise<void> {
@@ -13,7 +13,6 @@ export async function runIndexing(config: RootsConfig): Promise<void> {
 export async function forceReindex(config: RootsConfig): Promise<void> {
   const projects = findProjects(config);
   await upsertProjects(projects);
-  await cleanupMissing();
 }
 
 export async function indexGithubRepos(): Promise<void> {
@@ -26,6 +25,7 @@ export async function forceGithubReindex(): Promise<void> {
   const octokit = getOctokit();
   const repoEntries = await fetchGithubRepos(octokit, Number(GH_REPO_LIST_LIMIT));
   if (repoEntries.length > 0) {
+    const githubFullNames = new Set(repoEntries.map((r) => r.nameWithOwner));
     const projects = repoEntries.map((r) => ({
       path: toGithubPlaceholder(r.nameWithOwner),
       name: r.name,
@@ -33,5 +33,6 @@ export async function forceGithubReindex(): Promise<void> {
       githubFullName: r.nameWithOwner,
     }));
     await upsertProjects(projects);
+    await cleanupNotOnGithub(githubFullNames);
   }
 }

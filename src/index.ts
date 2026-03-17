@@ -72,10 +72,9 @@ program
 // ─── p remove ────────────────────────────────────────────────────────────
 program
   .command("remove [path]")
-  .description("Remove a project from the index and delete from disk")
+  .description("Delete a project from disk (index entry persists until next GitHub refetch)")
   .option("-f, --force", "skip confirmation")
-  .option("--no-delete", "only untrack from the index, keep files on disk")
-  .action(async (path: string | undefined, opts: { force?: boolean; delete?: boolean }) => {
+  .action(async (path: string | undefined, opts: { force?: boolean }) => {
     const { runProjectRemove } = await import("./commands/remove/index.ts");
     await runProjectRemove(path, opts);
   });
