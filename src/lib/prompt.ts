@@ -1,4 +1,5 @@
 import * as readline from "node:readline";
+import { suspendAbort } from "./abort.ts";
 
 export class SelectionCancelledError extends Error {
   constructor() {
@@ -8,21 +9,26 @@ export class SelectionCancelledError extends Error {
 }
 
 async function runFzf(input: string, extraArgs: string[] = []): Promise<string> {
-  const args = ["fzf", "--no-sort", "--ansi", ...extraArgs];
-  const proc = Bun.spawn(args, {
-    stdin: new Response(input),
-    stdout: "pipe",
-    stderr: "inherit",
-  });
+  const resumeAbort = suspendAbort();
+  try {
+    const args = ["fzf", "--no-sort", "--ansi", ...extraArgs];
+    const proc = Bun.spawn(args, {
+      stdin: new Response(input),
+      stdout: "pipe",
+      stderr: "inherit",
+    });
 
-  const output = await new Response(proc.stdout).text();
-  const exitCode = await proc.exited;
+    const output = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
 
-  if (exitCode !== 0 || !output.trim()) {
-    throw new SelectionCancelledError();
+    if (exitCode !== 0 || !output.trim()) {
+      throw new SelectionCancelledError();
+    }
+
+    return output.trim();
+  } finally {
+    resumeAbort();
   }
-
-  return output.trim();
 }
 
 export async function fzfSelect<T>(

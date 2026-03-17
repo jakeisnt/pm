@@ -3,6 +3,7 @@ import { isInteractive } from "./terminal.ts";
 
 let aborted = false;
 let activeProc: { kill(sig?: number | string): void } | null = null;
+let suspended = false;
 
 export function checkAbort(): void {
   if (aborted) {
@@ -30,7 +31,7 @@ export function enableAbort() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on("data", (chunk: Buffer) => {
-    if (aborted) return;
+    if (aborted || suspended) return;
 
     if (escPending) {
       escPending = false;
@@ -73,6 +74,26 @@ export function enableAbort() {
       }
     }
   });
+}
+
+/** Temporarily suspend abort handling (e.g. while fzf owns the terminal). */
+export function suspendAbort(): () => void {
+  suspended = true;
+  try {
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+    }
+  } catch {}
+  return () => {
+    suspended = false;
+    try {
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+      }
+    } catch {}
+  };
 }
 
 export function disableAbort() {

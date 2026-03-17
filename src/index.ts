@@ -2,6 +2,7 @@
 
 import { Command } from "commander";
 import { disableAbort, enableAbort } from "./lib/abort.ts";
+import { SelectionCancelledError } from "./lib/prompt.ts";
 
 const program = new Command();
 
@@ -27,6 +28,12 @@ program
         cloneDir: opts["cloneDir"] as string | undefined,
         json: Boolean(opts["json"]),
       });
+    } catch (err) {
+      if (err instanceof SelectionCancelledError) {
+        // User pressed Escape or Ctrl-C in fzf — exit silently
+        return;
+      }
+      throw err;
     } finally {
       disableAbort();
     }
