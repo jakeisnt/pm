@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import pc from "picocolors";
-import { getCachedProjects, getRecentProjects, removeProject } from "../../lib/db/index.ts";
+import { getCachedProjects, getRecentProjects } from "../../lib/db/index.ts";
 import { fuzzySelectProject } from "../../lib/fuzzy.ts";
 import { git } from "../../lib/github.ts";
 import { log } from "../../lib/log.ts";
@@ -32,11 +32,10 @@ async function selectProjectToRemove(pathArg?: string): Promise<{ path: string; 
   return { path: selected.path, name: selected.name };
 }
 
-export async function runProjectRemove(pathArg?: string, opts?: { force?: boolean; delete?: boolean }): Promise<void> {
+export async function runProjectRemove(pathArg?: string, opts?: { force?: boolean }): Promise<void> {
   const { path: target, name: projectName } = await selectProjectToRemove(pathArg);
-  const deleteFromDisk = opts?.delete ?? true;
 
-  if (deleteFromDisk && existsSync(target)) {
+  if (existsSync(target)) {
     const staged = git(["diff", "--cached", "--name-only"], target);
     if (staged.ok && staged.stdout.trim().length > 0) {
       log.error(`Project ${pc.cyan(projectName)} has staged changes. Commit or unstage them before deleting.`);
@@ -44,13 +43,12 @@ export async function runProjectRemove(pathArg?: string, opts?: { force?: boolea
     }
   }
 
-  log.phase(`${deleteFromDisk ? "Delete" : "Untrack"} project: ${projectName}`);
+  log.phase(`Delete project: ${projectName}`);
   log.item(`Path: ${pc.dim(target)}`);
+  log.dim("The project will remain in the index until the next GitHub refetch.");
 
   if (!opts?.force) {
-    const prompt = deleteFromDisk
-      ? `\nThis will ${pc.red("permanently delete")} the project from disk. The project will remain in the index. Continue? [y/N] `
-      : `\nThis will remove the project from the index. Continue? [y/N] `;
+    const prompt = `\nThis will ${pc.red("permanently delete")} the project from disk. Continue? [y/N] `;
     const answer = await askLine(prompt);
     if (answer.toLowerCase() !== "y") {
       log.dim("Aborted.");
@@ -58,19 +56,10 @@ export async function runProjectRemove(pathArg?: string, opts?: { force?: boolea
     }
   }
 
-  if (deleteFromDisk) {
-    if (existsSync(target)) {
-      await rm(target, { recursive: true });
-      log.success(`Deleted ${pc.cyan(target)} from disk`);
-    } else {
-      log.dim("Directory does not exist on disk; nothing to delete.");
-    }
+  if (existsSync(target)) {
+    await rm(target, { recursive: true });
+    log.success(`Deleted ${pc.cyan(target)} from disk`);
   } else {
-    const removed = await removeProject(target);
-    if (removed) {
-      log.success(`Untracked ${pc.cyan(projectName)}`);
-    } else {
-      log.dim("No project record found; nothing was removed from the index.");
-    }
+    log.dim("Directory does not exist on disk; nothing to delete.");
   }
 }
