@@ -6,7 +6,7 @@ export interface Project {
   name: string;
   lastOpened?: number; // unix ms
   source: ProjectSource;
-  githubFullName?: string; // e.g. "jakeisnt/pm"
+  githubFullName?: string; // e.g. "owner/repo"
   scope?: ProjectScope;
 }
 

@@ -5,10 +5,10 @@
     "": {
       "name": "pm",
       "dependencies": {
-        "@uln/cmd": "file:../../ulnd/lib/packages/cmd",
-        "@uln/env": "file:../../ulnd/lib/packages/env",
-        "@uln/log": "file:../../ulnd/lib/packages/log",
-        "@uln/repo": "file:../../ulnd/lib/packages/repo",
+        "@uln/cmd": "^0.1.0",
+        "@uln/env": "^0.1.0",
+        "@uln/log": "^0.1.0",
+        "@uln/repo": "^0.1.0",
         "kysely": "^0.28.11",
         "kysely-bun-sqlite": "^0.4.0",
         "nanospinner": "^1.2.2",
@@ -21,6 +21,9 @@
         "typescript": "^5",
       },
     },
+  },
+  "overrides": {
+    "@uln/log": "^0.1.0",
   },
   "packages": {
     "@biomejs/biome": ["@biomejs/biome@2.4.7", "", { "optionalDependencies": { "@biomejs/cli-darwin-arm64": "2.4.7", "@biomejs/cli-darwin-x64": "2.4.7", "@biomejs/cli-linux-arm64": "2.4.7", "@biomejs/cli-linux-arm64-musl": "2.4.7", "@biomejs/cli-linux-x64": "2.4.7", "@biomejs/cli-linux-x64-musl": "2.4.7", "@biomejs/cli-win32-arm64": "2.4.7", "@biomejs/cli-win32-x64": "2.4.7" }, "bin": { "biome": "bin/biome" } }, "sha512-vXrgcmNGZ4lpdwZSpMf1hWw1aWS6B+SyeSYKTLrNsiUsAdSRN0J4d/7mF3ogJFbIwFFSOL3wT92Zzxia/d5/ng=="],
@@ -97,13 +100,13 @@
 
     "@types/node": ["@types/node@25.5.0", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw=="],
 
-    "@uln/cmd": ["@uln/cmd@file:../../ulnd/lib/packages/cmd", { "peerDependencies": { "commander": "^14.0.3", "picocolors": "^1.1.1" } }],
+    "@uln/cmd": ["@uln/cmd@0.1.0", "", { "peerDependencies": { "commander": "^14.0.3", "picocolors": "^1.1.1" } }, "sha512-jZxFz8nz+KcEPH2BQfRu4wuTwa/XPFSqTHy9RPZxf3j9jIkEG1W6jwWjBXwoZJ6Kd/J9WYmV2OHS7YmjwuNeuA=="],
 
-    "@uln/env": ["@uln/env@file:../../ulnd/lib/packages/env", { "devDependencies": { "zod": "^4.0.0" }, "peerDependencies": { "zod": "^4.0.0" } }],
+    "@uln/env": ["@uln/env@0.1.0", "", { "peerDependencies": { "zod": "^4.0.0" } }, "sha512-psrQ1BABmp42EriQtFZ6TWBNytAmaDVwlLvcUOUik7eaPtWDj1+gRBTSaKS46Ah+H7NyrgEaZK5rAyf2B/G1BQ=="],
 
-    "@uln/log": ["@uln/log@file:../../ulnd/lib/packages/log", { "peerDependencies": { "picocolors": "^1.1.1" } }],
+    "@uln/log": ["@uln/log@0.1.0", "", { "peerDependencies": { "picocolors": "^1.1.1" } }, "sha512-W+cw+JsHftL/1khDbf/xrqGDv03TyERVMIhT7sO7scJGSxUT6KnR/NtWbxorn47eWYlu5JpaqPcJO3AcvxGTAA=="],
 
-    "@uln/repo": ["@uln/repo@file:../../ulnd/lib/packages/repo", { "dependencies": { "@uln/log": "file:../log", "octokit": "^5.0.0", "zod": "^4.0.0" } }],
+    "@uln/repo": ["@uln/repo@0.1.0", "", { "dependencies": { "@uln/log": "workspace:*", "octokit": "^5.0.0", "zod": "^4.0.0" } }, "sha512-O+pYxrLfUx0txXiQSqHMkUFx6nJINUFOKuNaZtvuwf9ndQWsuZdpqqTkk1+hCU8+nse5UVPBdewudrF44WU81w=="],
 
     "before-after-hook": ["before-after-hook@4.0.0", "", {}, "sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ=="],
 
@@ -138,7 +141,5 @@
     "universal-user-agent": ["universal-user-agent@7.0.3", "", {}, "sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A=="],
 
     "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
-
-    "@uln/repo/@uln/log": ["@uln/log@file:../../ulnd/lib/packages/log", { "peerDependencies": { "picocolors": "^1.1.1" } }],
   }
 }

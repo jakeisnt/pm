@@ -114,10 +114,10 @@ describe("projects", () => {
   test("getCachedProjects filters by source", async () => {
     await upsertProject({ path: "/tmp/local-proj", name: "local-proj", source: "local" });
     await upsertProject({
-      path: "github://jakeisnt/remote",
+      path: "github://example-user/remote",
       name: "remote",
       source: "github",
-      githubFullName: "jakeisnt/remote",
+      githubFullName: "example-user/remote",
     });
 
     const local = await getCachedProjects("local");

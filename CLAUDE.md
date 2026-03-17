@@ -1,6 +1,6 @@
 # pm — Project Manager
 
-A Bun TypeScript CLI tool. `p` is the binary. Manages project switching, per-project knowledge (repo memories), and project discovery. Private project for personal use.
+A Bun TypeScript CLI tool. `p` is the binary. Manages project switching, per-project knowledge (repo memories), and project discovery.
 
 ## Quick Start
 

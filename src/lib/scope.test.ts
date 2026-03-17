@@ -6,43 +6,21 @@ import { inferProjectScope } from "./scope.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "migrations");
 
-describe("inferProjectScope (hardcoded defaults)", () => {
+describe("inferProjectScope (no defaults configured)", () => {
   beforeEach(() => {
     _resetForTesting(MIGRATIONS_DIR);
   });
 
-  test("returns 'work' for work org in githubFullName", () => {
-    expect(inferProjectScope({ githubFullName: "improvin/some-repo" })).toBe("work");
-  });
-
-  test("returns 'work' case-insensitively for org name", () => {
-    expect(inferProjectScope({ githubFullName: "Improvin/some-repo" })).toBe("work");
-  });
-
-  test("returns 'personal' for non-work org", () => {
-    expect(inferProjectScope({ githubFullName: "jakeisnt/pm" })).toBe("personal");
-  });
-
-  test("returns 'work' for work path prefix", () => {
-    expect(inferProjectScope({ path: "/Users/jake/Documents/improvin/some-project" })).toBe("work");
-  });
-
-  test("returns 'personal' for non-work path", () => {
-    expect(inferProjectScope({ path: "/Users/jake/Documents/personal/my-project" })).toBe("personal");
-  });
-
-  test("returns 'personal' with no inputs", () => {
+  test("returns 'personal' with no settings and no inputs", () => {
     expect(inferProjectScope({})).toBe("personal");
   });
 
-  test("githubFullName takes precedence over path", () => {
-    // work org, personal path — org wins since it's checked first
-    expect(
-      inferProjectScope({
-        githubFullName: "improvin/tool",
-        path: "/Users/jake/Documents/personal/tool",
-      }),
-    ).toBe("work");
+  test("returns 'personal' for any org when no work_orgs configured", () => {
+    expect(inferProjectScope({ githubFullName: "acme/some-repo" })).toBe("personal");
+  });
+
+  test("returns 'personal' for any path when no work_path_prefixes configured", () => {
+    expect(inferProjectScope({ path: "/home/user/projects/some-project" })).toBe("personal");
   });
 });
 
@@ -57,9 +35,8 @@ describe("inferProjectScope (settings-driven)", () => {
 
   test("work_orgs setting overrides default org list", () => {
     setSetting("work_orgs", "acme");
-    // acme is now a work org, improvin is no longer
     expect(inferProjectScope({ githubFullName: "acme/tool" })).toBe("work");
-    expect(inferProjectScope({ githubFullName: "improvin/tool" })).toBe("personal");
+    expect(inferProjectScope({ githubFullName: "other/tool" })).toBe("personal");
   });
 
   test("work_orgs setting supports multiple comma-separated values", () => {
@@ -79,7 +56,7 @@ describe("inferProjectScope (settings-driven)", () => {
   test("work_path_prefixes setting overrides default path list", () => {
     setSetting("work_path_prefixes", "/work/projects");
     expect(inferProjectScope({ path: "/work/projects/my-app" })).toBe("work");
-    expect(inferProjectScope({ path: "/Users/jake/Documents/improvin/old" })).toBe("personal");
+    expect(inferProjectScope({ path: "/home/user/other/old" })).toBe("personal");
   });
 
   test("work_path_prefixes setting supports multiple comma-separated values", () => {
@@ -91,12 +68,12 @@ describe("inferProjectScope (settings-driven)", () => {
 
   test("empty work_orgs setting makes all orgs personal", () => {
     setSetting("work_orgs", "");
-    expect(inferProjectScope({ githubFullName: "improvin/tool" })).toBe("personal");
+    expect(inferProjectScope({ githubFullName: "other/tool" })).toBe("personal");
   });
 
   test("empty work_path_prefixes setting makes all paths personal", () => {
     setSetting("work_path_prefixes", "");
-    expect(inferProjectScope({ path: "/Users/jake/Documents/improvin/proj" })).toBe("personal");
+    expect(inferProjectScope({ path: "/home/user/work/proj" })).toBe("personal");
   });
 
   test("settings with extra whitespace are trimmed correctly", () => {

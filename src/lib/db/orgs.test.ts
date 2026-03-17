@@ -3,11 +3,11 @@ import { extractOrgName, LOCAL_ORG } from "./orgs.ts";
 
 describe("extractOrgName", () => {
   test("returns org name from github full name", () => {
-    expect(extractOrgName("jakeisnt/pm")).toBe("jakeisnt");
+    expect(extractOrgName("example-user/pm")).toBe("example-user");
   });
 
   test("lowercases org name", () => {
-    expect(extractOrgName("Improvin/some-repo")).toBe("improvin");
+    expect(extractOrgName("Acme-Corp/some-repo")).toBe("acme-corp");
   });
 
   test("returns LOCAL_ORG for null", () => {

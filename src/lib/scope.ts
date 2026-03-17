@@ -2,10 +2,10 @@ import type { ProjectScope } from "../types.ts";
 import { getSetting } from "./db/settings.ts";
 
 /** GitHub orgs whose projects are considered "work" scope (fallback defaults). */
-const DEFAULT_WORK_ORGS = ["improvin"];
+const DEFAULT_WORK_ORGS: string[] = [];
 
 /** Path prefixes that indicate work scope (fallback defaults). */
-const DEFAULT_WORK_PATH_PREFIXES = ["/Users/jake/Documents/improvin"];
+const DEFAULT_WORK_PATH_PREFIXES: string[] = [];
 
 function parseCommaSeparated(value: string): string[] {
   return value

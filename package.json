@@ -1,7 +1,7 @@
 {
   "name": "pm",
   "version": "0.1.0",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "p": "./src/index.ts"
@@ -14,15 +14,18 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@uln/cmd": "file:../../ulnd/lib/packages/cmd",
-    "@uln/env": "file:../../ulnd/lib/packages/env",
-    "@uln/log": "file:../../ulnd/lib/packages/log",
-    "@uln/repo": "file:../../ulnd/lib/packages/repo",
+    "@uln/cmd": "^0.1.0",
+    "@uln/env": "^0.1.0",
+    "@uln/log": "^0.1.0",
+    "@uln/repo": "^0.1.0",
     "kysely": "^0.28.11",
     "kysely-bun-sqlite": "^0.4.0",
     "nanospinner": "^1.2.2",
     "picocolors": "^1.1.1",
     "zod": "^4.3.6"
+  },
+  "overrides": {
+    "@uln/log": "^0.1.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",

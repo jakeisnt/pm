@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-const CLI_CWD = "/Users/jake/Documents/jakeisnt/pm";
+const CLI_CWD = import.meta.dir.replace(/\/src$/, "");
 
 function spawnCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const result = Bun.spawnSync(["bun", "run", "src/index.ts", ...args], {
