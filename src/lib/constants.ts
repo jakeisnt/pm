@@ -26,3 +26,9 @@ export const MAX_RECENT = 100;
 export const DEFAULT_ROOTS = [join(homedir(), "Documents")];
 /** Default max depth for recursive project discovery. */
 export const DEFAULT_DEPTH = 2;
+
+// ─── Failure hooks ──────────────────────────────────────────────────────
+/** Default CLI to run when a command is not found. */
+export const DEFAULT_ON_MISSING_COMMAND = 'echo "could not find command"';
+/** Default CLI to run on unhandled error. Receives PM_ERROR, PM_ERROR_TRACE, PM_REPO env vars. */
+export const DEFAULT_ON_ERROR = 'echo "error in $PM_REPO: $PM_ERROR"';

@@ -1,7 +1,12 @@
 #!/usr/bin/env bun
 
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Command } from "@uln/cmd";
 import { disableAbort, enableAbort } from "./lib/abort.ts";
+import { loadConfig } from "./lib/config.ts";
+import { runShellHook } from "./lib/hooks.ts";
 import { SelectionCancelledError } from "./lib/prompt.ts";
 
 const program = new Command();
@@ -168,5 +173,28 @@ program
     }
   });
 
+// ─── Unknown command hook ────────────────────────────────────────────────
+program.on("command:*", (args: string[]) => {
+  const config = loadConfig();
+  runShellHook(config.onMissingCommand, {
+    PM_COMMAND: args.join(" "),
+  });
+  process.exitCode = 1;
+});
+
 // ─── Parse ───────────────────────────────────────────────────────────────
-program.parse();
+try {
+  program.parse();
+} catch (err) {
+  const config = loadConfig();
+  const errorMsg = err instanceof Error ? err.message : String(err);
+  const traceFile = join(tmpdir(), `pm-error-${Date.now()}.txt`);
+  const stack = err instanceof Error ? (err.stack ?? errorMsg) : errorMsg;
+  writeFileSync(traceFile, stack, "utf-8");
+  runShellHook(config.onError, {
+    PM_ERROR: errorMsg,
+    PM_ERROR_TRACE: traceFile,
+    PM_REPO: process.cwd(),
+  });
+  process.exitCode = 1;
+}

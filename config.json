@@ -1,0 +1,4 @@
+{
+  "onMissingCommand": "echo \"could not find command\"",
+  "onError": "echo \"error in $PM_REPO: $PM_ERROR\""
+}
