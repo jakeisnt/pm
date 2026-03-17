@@ -12,13 +12,18 @@ interface Project {
   scope?: "personal" | "work" | "global";
 }
 
-// Resolve the absolute path of `p` once — bun-linked binaries live here
+// Resolve absolute paths — Raycast's env may not include ~/.bun/bin in PATH
+const BUN_BIN = join(homedir(), ".bun", "bin", "bun");
 const P_BIN = join(homedir(), ".bun", "bin", "p");
 
 // biome-ignore lint/style/noDefaultExport: Raycast requires default export for commands
 export default function SearchProjects() {
-  const { data, isLoading } = useExec(P_BIN, ["list", "--json"], {
-    parseOutput: ({ stdout }) => JSON.parse(stdout) as Project[],
+  const { data, isLoading } = useExec(BUN_BIN, ["run", P_BIN, "list", "--json"], {
+    parseOutput: ({ stdout }) => {
+      const trimmed = stdout.trim();
+      if (!trimmed) return [];
+      return JSON.parse(trimmed) as Project[];
+    },
   });
 
   const projects = data ?? [];
@@ -72,7 +77,7 @@ function ProjectItem({ project }: { project: Project }) {
               title="Record in History"
               icon={Icon.Clock}
               onAction={() => {
-                execSync(`${P_BIN} ${JSON.stringify(project.name)} --silent`);
+                execSync(`${BUN_BIN} run ${P_BIN} ${JSON.stringify(project.name)} --silent`);
               }}
             />
           )}
