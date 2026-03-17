@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { cloneGithubRepo, isGithubPlaceholder } from "@uln/repo";
 import { createSpinner } from "nanospinner";
 import type { Project, RootsConfig, SelectOptions } from "../types.ts";
@@ -95,12 +96,14 @@ export async function runProjectSelect(
     if (existing && existsSync(existing.path)) {
       targetPath = existing.path;
     } else {
-      const cloneSpinner = createSpinner(`Cloning ${fullName}...`).start();
       const cloneDir = options.cloneDir || roots[0];
       if (!cloneDir) throw new Error("No clone directory configured");
-      const cloneResult = cloneGithubRepo(fullName, cloneDir);
-      targetPath = cloneResult.path;
+      const [owner, repo] = fullName.split("/");
+      if (!owner || !repo) throw new Error(`Invalid GitHub full name: ${fullName}`);
+      targetPath = join(cloneDir, owner, repo);
       await promoteToLocal(fullName, targetPath);
+      const cloneSpinner = createSpinner(`Cloning ${fullName}...`).start();
+      const cloneResult = cloneGithubRepo(fullName, cloneDir);
       cloneSpinner.success({
         text: cloneResult.alreadyExisted ? `Found local clone of ${fullName}` : `Cloned ${fullName}`,
       });
