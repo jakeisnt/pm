@@ -2,11 +2,10 @@
 
 import { Command } from "commander";
 import { disableAbort, enableAbort } from "./lib/abort.ts";
-import { REPO_MEMORY_CATEGORIES, REPO_MEMORY_SOURCES } from "./lib/repo-memories.ts";
 
 const program = new Command();
 
-program.name("p").description("Project manager — switch projects, manage per-project knowledge").version("0.1.0");
+program.name("p").description("Project manager — switch between projects quickly").version("0.1.0");
 
 // ─── p (default): fuzzy select a project ─────────────────────────────────
 program
@@ -33,129 +32,26 @@ program
     }
   });
 
-// ─── p repo ──────────────────────────────────────────────────────────────
-const repo = program.command("repo").description("Repository knowledge and management");
-
-repo
-  .command("status")
-  .description("Show what's known about the current repo")
-  .option("--path <path>", "repo path")
-  .option("--json", "output as JSON")
-  .action(async (opts: { path?: string; json?: boolean }) => {
-    const { runRepoStatus } = await import("./commands/repo/index.ts");
-    await runRepoStatus(opts);
-  });
-
-repo
+// ─── p list ──────────────────────────────────────────────────────────────
+program
   .command("list")
-  .description("List all tracked repos")
+  .description("List all tracked projects")
   .option("--source <source>", "filter by source (local/github)")
   .option("--scope <scope>", "filter by scope (personal/work)")
   .option("--json", "output as JSON")
   .action(async (opts: { source?: string; scope?: string; json?: boolean }) => {
-    const { runRepoList } = await import("./commands/repo/index.ts");
-    await runRepoList(opts);
+    const { runProjectList } = await import("./commands/list/index.ts");
+    await runProjectList(opts);
   });
 
-repo
+// ─── p remove ────────────────────────────────────────────────────────────
+program
   .command("remove [path]")
-  .description("Untrack a repo (preserves memories)")
+  .description("Untrack a project")
   .option("-f, --force", "skip confirmation")
   .action(async (path: string | undefined, opts: { force?: boolean }) => {
-    const { runRepoRemove } = await import("./commands/repo/index.ts");
-    await runRepoRemove(path, opts);
-  });
-
-// ─── p repo memory ───────────────────────────────────────────────────────
-const memory = repo.command("memory").description("Manage per-repo knowledge entries");
-
-memory
-  .command("list")
-  .description("List memories for the current repo")
-  .option("--path <path>", "repo path")
-  .option("--category <cat>", `filter by category (${REPO_MEMORY_CATEGORIES.join(", ")})`)
-  .option("--source <src>", `filter by source (${REPO_MEMORY_SOURCES.join(", ")})`)
-  .option("--search <term>", "search key/value/tags")
-  .option("--tag <tag>", "filter by tag")
-  .option("--json", "output as JSON")
-  .action(
-    async (opts: {
-      path?: string;
-      category?: string;
-      source?: string;
-      search?: string;
-      tag?: string;
-      json?: boolean;
-    }) => {
-      const { runRepoMemoryList } = await import("./commands/repo/index.ts");
-      await runRepoMemoryList(opts);
-    },
-  );
-
-memory
-  .command("add <category> <key> <value>")
-  .description("Add a memory to the current repo")
-  .option("--path <path>", "repo path")
-  .option("--tags <tags>", "comma-separated tags")
-  .option("--source <src>", "source (manual/agent/learn)")
-  .option("--source-ref <ref>", "source reference")
-  .action(
-    async (
-      category: string,
-      key: string,
-      value: string,
-      opts: { path?: string; tags?: string; source?: string; sourceRef?: string },
-    ) => {
-      const { runRepoMemoryAdd } = await import("./commands/repo/index.ts");
-      await runRepoMemoryAdd(category, key, value, opts);
-    },
-  );
-
-memory
-  .command("show <id>")
-  .description("Show details of a specific memory")
-  .action(async (id: string) => {
-    const { runRepoMemoryShow } = await import("./commands/repo/index.ts");
-    await runRepoMemoryShow(id);
-  });
-
-memory
-  .command("rm <id>")
-  .description("Remove a memory")
-  .action(async (id: string) => {
-    const { runRepoMemoryRemove } = await import("./commands/repo/index.ts");
-    await runRepoMemoryRemove(id);
-  });
-
-memory
-  .command("clear")
-  .description("Clear all memories for the current repo")
-  .option("--path <path>", "repo path")
-  .option("--category <cat>", "clear only this category")
-  .option("--source <src>", "clear only this source")
-  .action(async (opts: { path?: string; category?: string; source?: string }) => {
-    const { runRepoMemoryClear } = await import("./commands/repo/index.ts");
-    await runRepoMemoryClear(opts);
-  });
-
-memory
-  .command("prompt")
-  .description("Output memories as markdown for agent injection")
-  .option("--path <path>", "repo path")
-  .option("--copy", "copy to clipboard")
-  .action(async (opts: { path?: string; copy?: boolean }) => {
-    const { runRepoMemoryPrompt } = await import("./commands/repo/index.ts");
-    await runRepoMemoryPrompt(opts);
-  });
-
-// ─── p memory (overview) ─────────────────────────────────────────────────
-program
-  .command("memory")
-  .description("Overview of repo memories across all repos")
-  .option("--json", "output as JSON")
-  .action(async (opts: { json?: boolean }) => {
-    const { runMemoryOverview } = await import("./commands/repo/index.ts");
-    await runMemoryOverview(opts);
+    const { runProjectRemove } = await import("./commands/remove/index.ts");
+    await runProjectRemove(path, opts);
   });
 
 // ─── p dev ───────────────────────────────────────────────────────────────

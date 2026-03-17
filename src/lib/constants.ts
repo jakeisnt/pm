@@ -21,10 +21,6 @@ export const GH_REPO_LIST_LIMIT = "1000";
 /** Default number of recent projects to return from queries. */
 export const MAX_RECENT = 100;
 
-// ─── Memory ranking ─────────────────────────────────────────────────────
-/** Maximum memories to include in a task-ranked system prompt. */
-export const MAX_RANKED_MEMORIES = 30;
-
 // ─── Project discovery ───────────────────────────────────────────────────
 /** Default root directories for project scanning. */
 export const DEFAULT_ROOTS = [join(homedir(), "Documents")];

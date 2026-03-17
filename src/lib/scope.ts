@@ -1,5 +1,4 @@
 import type { ProjectScope } from "../types.ts";
-import { getDb } from "./db/index.ts";
 
 /** GitHub orgs whose projects are considered "work" scope. */
 const WORK_ORGS = ["improvin"];
@@ -18,30 +17,4 @@ export function inferProjectScope(opts: { githubFullName?: string; path?: string
     }
   }
   return "personal";
-}
-
-export async function resolveScope(cwd?: string): Promise<ProjectScope> {
-  const dir = cwd ?? process.cwd();
-
-  const projects = await getDb()
-    .selectFrom("projects")
-    .select(["path", "scope"])
-    .where("source", "=", "local")
-    .where("deleted_at", "is", null)
-    .execute();
-
-  let bestScope: string | undefined;
-  let bestLen = 0;
-  for (const p of projects) {
-    if (dir.startsWith(p.path) && p.path.length > bestLen) {
-      bestScope = p.scope;
-      bestLen = p.path.length;
-    }
-  }
-
-  if (bestScope) {
-    return bestScope as ProjectScope;
-  }
-
-  return inferProjectScope({ path: dir });
 }
