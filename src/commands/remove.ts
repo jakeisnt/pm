@@ -3,9 +3,9 @@ import { rm } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import pc from "picocolors";
 import { getCachedProjects, getRecentProjects } from "../lib/db/index.ts";
-import { fuzzySelectProject } from "../lib/fuzzy.ts";
 import { git } from "../lib/github.ts";
 import { log } from "../lib/log.ts";
+import { fuzzySelectProject } from "../lib/project-select.ts";
 import { askLine } from "../lib/prompt.ts";
 
 async function selectProjectToRemove(pathArg?: string): Promise<{ path: string; name: string }> {
