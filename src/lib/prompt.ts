@@ -11,7 +11,7 @@ export class SelectionCancelledError extends Error {
 async function runFzf(input: string, extraArgs: string[] = []): Promise<string> {
   const resumeAbort = suspendAbort();
   try {
-    const args = ["fzf", "--no-sort", "--ansi", ...extraArgs];
+    const args = ["fzf", "--ansi", ...extraArgs];
     const proc = Bun.spawn(args, {
       stdin: new Response(input),
       stdout: "pipe",
