@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import pc from "picocolors";
 import { getCachedProjects, getRecentProjects, removeProject } from "../../lib/db/index.ts";
@@ -29,14 +31,18 @@ async function selectProjectToRemove(pathArg?: string): Promise<{ path: string; 
   return { path: selected.path, name: selected.name };
 }
 
-export async function runProjectRemove(pathArg?: string, opts?: { force?: boolean }): Promise<void> {
+export async function runProjectRemove(pathArg?: string, opts?: { force?: boolean; delete?: boolean }): Promise<void> {
   const { path: target, name: projectName } = await selectProjectToRemove(pathArg);
+  const deleteFromDisk = opts?.delete ?? false;
 
-  log.phase(`Untrack project: ${projectName}`);
+  log.phase(`${deleteFromDisk ? "Delete" : "Untrack"} project: ${projectName}`);
   log.item(`Path: ${pc.dim(target)}`);
 
   if (!opts?.force) {
-    const answer = await askLine(`\nThis will remove the project from the index. Continue? [y/N] `);
+    const prompt = deleteFromDisk
+      ? `\nThis will ${pc.red("permanently delete")} the project from disk and remove it from the index. Continue? [y/N] `
+      : `\nThis will remove the project from the index. Continue? [y/N] `;
+    const answer = await askLine(prompt);
     if (answer.toLowerCase() !== "y") {
       log.dim("Aborted.");
       return;
@@ -48,5 +54,14 @@ export async function runProjectRemove(pathArg?: string, opts?: { force?: boolea
     log.success(`Untracked ${pc.cyan(projectName)}`);
   } else {
     log.dim("No project record found; nothing was removed from the index.");
+  }
+
+  if (deleteFromDisk) {
+    if (existsSync(target)) {
+      await rm(target, { recursive: true });
+      log.success(`Deleted ${pc.cyan(target)} from disk`);
+    } else {
+      log.dim("Directory does not exist on disk; nothing to delete.");
+    }
   }
 }

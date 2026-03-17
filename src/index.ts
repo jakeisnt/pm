@@ -72,9 +72,10 @@ program
 // ─── p remove ────────────────────────────────────────────────────────────
 program
   .command("remove [path]")
-  .description("Untrack a project")
+  .description("Untrack a project (or delete from disk with --delete)")
   .option("-f, --force", "skip confirmation")
-  .action(async (path: string | undefined, opts: { force?: boolean }) => {
+  .option("-d, --delete", "also delete the project directory from disk")
+  .action(async (path: string | undefined, opts: { force?: boolean; delete?: boolean }) => {
     const { runProjectRemove } = await import("./commands/remove/index.ts");
     await runProjectRemove(path, opts);
   });
