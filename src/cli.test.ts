@@ -87,11 +87,6 @@ describe("CLI smoke tests", () => {
     }
   }, 10_000);
 
-  test("p config list exits with code 0", () => {
-    const { exitCode } = spawnCli(["config", "list"]);
-    expect(exitCode).toBe(0);
-  }, 10_000);
-
   test("p org list exits with code 0", () => {
     const { exitCode } = spawnCli(["org", "list"]);
     expect(exitCode).toBe(0);

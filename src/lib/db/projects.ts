@@ -1,5 +1,5 @@
 import type { Project } from "../../types.ts";
-import { getGithubReindexInterval, getReindexInterval } from "../config/index.ts";
+import { loadConfig } from "../config/index.ts";
 import { getDb } from "./database.ts";
 import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";
@@ -147,7 +147,7 @@ export async function needsGithubReindex(): Promise<boolean> {
     .where("deleted_at", "is", null)
     .executeTakeFirst();
   if (!row?.latest) return true;
-  return Date.now() - (row.latest as number) > getGithubReindexInterval();
+  return Date.now() - (row.latest as number) > loadConfig().githubReindexIntervalMs;
 }
 
 export async function getLocalProjectByGithubName(fullName: string): Promise<Project | null> {
@@ -235,7 +235,7 @@ export async function needsReindex(): Promise<boolean> {
     .where("deleted_at", "is", null)
     .executeTakeFirst();
   if (!row?.latest) return true;
-  return Date.now() - (row.latest as number) > getReindexInterval();
+  return Date.now() - (row.latest as number) > loadConfig().reindexIntervalMs;
 }
 
 export async function touchProject(path: string): Promise<void> {

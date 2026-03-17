@@ -1,33 +1,22 @@
 // ─── Config module public API ───────────────────────────────────────────
 //
 // Single entry point for all configuration: hardcoded defaults, env vars,
-// DB-backed settings, and file-based config.
+// and file-based config (config.json).
 
-// Hardcoded defaults
+// Config file (config.json with hardcoded fallbacks)
+export type { PmConfig } from "./config-file.ts";
 export {
-  DEFAULT_DEPTH,
-  DEFAULT_ON_ERROR,
-  DEFAULT_ON_MISSING_COMMAND,
-  DEFAULT_ROOTS,
+  deleteConfigValue,
+  getConfigPath,
+  loadConfig,
+  setConfigValue,
+} from "./config-file.ts";
+// Hardcoded defaults (internal constants not in config.json)
+export {
   ESC_DISAMBIGUATE_MS,
   EXIT_ABORT,
   GH_REPO_LIST_LIMIT,
-  GITHUB_REINDEX_INTERVAL_MS,
-  MAX_RECENT,
-  REINDEX_INTERVAL_MS,
 } from "./defaults.ts";
 
 // Environment variables
 export { env, getEditor, getShell } from "./env.ts";
-// File-based config (config.json)
-export { loadConfig } from "./file-config.ts";
-// DB-backed settings
-export type { SettingDef } from "./settings.ts";
-export {
-  getGithubReindexInterval,
-  getMaxRecent,
-  getReindexInterval,
-  getSearchDepth,
-  getSearchRoots,
-  SETTING_DEFS,
-} from "./settings.ts";

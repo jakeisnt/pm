@@ -11,7 +11,6 @@ import {
   upsertProjects,
 } from "./projects.ts";
 import { getRecentProjects, touchRecentProject } from "./recent.ts";
-import { deleteAllSettings, deleteSetting, getAllSettings, getSetting, setSetting } from "./settings.ts";
 
 const MIGRATIONS_DIR = join(import.meta.dir, "..", "..", "..", "migrations");
 
@@ -172,47 +171,6 @@ describe("projects", () => {
     expect(await getProjectsCount()).toBe(2);
     await removeProject("/tmp/a");
     expect(await getProjectsCount()).toBe(1);
-  });
-});
-
-// ─── Settings ────────────────────────────────────────────────────────────
-
-describe("settings", () => {
-  test("set and get a setting", () => {
-    setSetting("test_key", "test_value");
-    expect(getSetting("test_key")).toBe("test_value");
-  });
-
-  test("getSetting returns undefined for missing key", () => {
-    expect(getSetting("nonexistent")).toBeUndefined();
-  });
-
-  test("setSetting overwrites existing value", () => {
-    setSetting("key", "v1");
-    setSetting("key", "v2");
-    expect(getSetting("key")).toBe("v2");
-  });
-
-  test("deleteSetting soft-deletes", () => {
-    setSetting("to_delete", "value");
-    deleteSetting("to_delete");
-    expect(getSetting("to_delete")).toBeUndefined();
-  });
-
-  test("getAllSettings returns all active settings", () => {
-    setSetting("a", "1");
-    setSetting("b", "2");
-    const all = getAllSettings();
-    expect(all["a"]).toBe("1");
-    expect(all["b"]).toBe("2");
-  });
-
-  test("deleteAllSettings clears everything", () => {
-    setSetting("x", "1");
-    setSetting("y", "2");
-    deleteAllSettings();
-    expect(getSetting("x")).toBeUndefined();
-    expect(getSetting("y")).toBeUndefined();
   });
 });
 

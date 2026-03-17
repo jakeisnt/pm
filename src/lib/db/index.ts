@@ -23,12 +23,4 @@ export {
 } from "./projects.ts";
 export { getRecentProjects, touchRecentProject } from "./recent.ts";
 export type { DB } from "./schema.ts";
-export {
-  deleteAllSettings,
-  deleteSetting,
-  getAllSettings,
-  getAllSettingsRaw,
-  getSetting,
-  setSetting,
-} from "./settings.ts";
 export { getCurrentSystemId, getCurrentSystemName, listSystems } from "./systems.ts";

@@ -1,37 +1,23 @@
 import pc from "picocolors";
-import { SETTING_DEFS } from "../lib/config/index.ts";
-import { deleteSetting, getAllSettingsRaw, setSetting } from "../lib/db/index.ts";
+import { deleteConfigValue, getConfigPath, loadConfig, setConfigValue } from "../lib/config/index.ts";
 import { log } from "../lib/log.ts";
 
 export function runConfigList(): void {
-  const raw = getAllSettingsRaw();
-
-  if (raw.length === 0) {
-    log.dim("No settings configured. Using defaults.");
-    log.blank();
-    log.phase("Available settings:");
-    for (const [key, def] of Object.entries(SETTING_DEFS)) {
-      log.item(`${pc.bold(key)}: ${def.description} ${pc.dim(`(default: ${def.default})`)}`);
-    }
-    return;
-  }
-
+  const config = loadConfig();
   log.blank();
-  log.phase("Current Settings");
-  for (const { key, value } of raw) {
-    log.item(`${pc.bold(key)} = ${value}`);
+  log.phase(`Config (${getConfigPath()})`);
+  for (const [key, value] of Object.entries(config)) {
+    log.item(`${pc.bold(key)} = ${typeof value === "string" ? value : JSON.stringify(value)}`);
   }
   log.blank();
 }
 
-export function runConfigSet(key: string, value: string, opts?: { device?: boolean }): void {
-  const def = SETTING_DEFS[key];
-  const device = opts?.device ?? def?.deviceLocal ?? false;
-  setSetting(key, value, device);
-  log.success(`Set ${pc.bold(key)} = ${value}${device ? " (device-scoped)" : ""}`);
+export function runConfigSet(key: string, value: string): void {
+  setConfigValue(key, value);
+  log.success(`Set ${pc.bold(key)} = ${value}`);
 }
 
 export function runConfigDelete(key: string): void {
-  deleteSetting(key);
-  log.success(`Deleted ${pc.bold(key)}`);
+  deleteConfigValue(key);
+  log.success(`Deleted ${pc.bold(key)} (will use default)`);
 }

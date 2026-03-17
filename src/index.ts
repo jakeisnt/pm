@@ -94,9 +94,9 @@ program
   });
 
 // ─── p config ────────────────────────────────────────────────────────────
-const config = program.command("config").description("Manage CLI settings");
+const configCmd = program.command("config").description("Manage CLI settings (config.json)");
 
-config
+configCmd
   .command("list")
   .description("Show all settings")
   .action(async () => {
@@ -104,18 +104,17 @@ config
     runConfigList();
   });
 
-config
+configCmd
   .command("set <key> <value>")
   .description("Set a configuration value")
-  .option("-d, --device", "scope to this device only")
-  .action(async (key: string, value: string, opts: { device?: boolean }) => {
+  .action(async (key: string, value: string) => {
     const { runConfigSet } = await import("./commands/config.ts");
-    runConfigSet(key, value, opts);
+    runConfigSet(key, value);
   });
 
-config
+configCmd
   .command("delete <key>")
-  .description("Delete a setting")
+  .description("Delete a setting (reverts to default)")
   .action(async (key: string) => {
     const { runConfigDelete } = await import("./commands/config.ts");
     runConfigDelete(key);
