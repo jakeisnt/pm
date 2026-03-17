@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { Project } from "../../types.ts";
 import { getGithubReindexInterval, getReindexInterval } from "../settings.ts";
 import { getDb } from "./database.ts";
+import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";
 import { generateId } from "./uuid.ts";
 
@@ -69,13 +70,16 @@ function toProject(row: {
 export async function getCachedProjects(source?: "local" | "github"): Promise<Project[]> {
   let query = getDb()
     .selectFrom("projects")
-    .select(["path", "name", "last_scanned", "source", "github_full_name"])
-    .where("is_git_repo", "=", 1)
-    .where("deleted_at", "is", null)
-    .orderBy("last_scanned", "desc");
+    .innerJoin("orgs", "orgs.name", "projects.org_name")
+    .select(["projects.path", "projects.name", "projects.last_scanned", "projects.source", "projects.github_full_name"])
+    .where("projects.is_git_repo", "=", 1)
+    .where("projects.deleted_at", "is", null)
+    .where("orgs.hidden", "=", 0)
+    .where("orgs.deleted_at", "is", null)
+    .orderBy("projects.last_scanned", "desc");
 
   if (source) {
-    query = query.where("source", "=", source);
+    query = query.where("projects.source", "=", source);
   }
 
   const rows = await query.execute();
@@ -88,6 +92,12 @@ export async function upsertProjects(projects: Project[]): Promise<void> {
   const db = getDb();
   const now = Date.now();
   const systemId = getCurrentSystemId();
+
+  // Collect unique org names and ensure they all exist
+  const orgNames = new Set(projects.map((p) => extractOrgName(p.githubFullName)));
+  for (const orgName of orgNames) {
+    await ensureOrg(orgName);
+  }
 
   const BATCH_SIZE = 50;
   for (let i = 0; i < projects.length; i += BATCH_SIZE) {
@@ -106,6 +116,7 @@ export async function upsertProjects(projects: Project[]): Promise<void> {
         source: p.source || "local",
         github_full_name: p.githubFullName || null,
         scope,
+        org_name: extractOrgName(p.githubFullName),
         system_id: systemId,
       };
     });
@@ -119,6 +130,7 @@ export async function upsertProjects(projects: Project[]): Promise<void> {
           source: (eb) => eb.ref("excluded.source"),
           github_full_name: (eb) => eb.ref("excluded.github_full_name"),
           scope: (eb) => eb.ref("excluded.scope"),
+          org_name: (eb) => eb.ref("excluded.org_name"),
         }),
       )
       .execute();
@@ -158,6 +170,8 @@ export async function promoteToLocal(githubFullName: string, localPath: string):
   const now = Date.now();
   const scope = inferProjectScope({ githubFullName, path: localPath });
   const systemId = getCurrentSystemId();
+  const orgName = extractOrgName(githubFullName);
+  await ensureOrg(orgName);
 
   await db
     .insertInto("projects")
@@ -171,6 +185,7 @@ export async function promoteToLocal(githubFullName: string, localPath: string):
       source: "local",
       github_full_name: githubFullName,
       scope,
+      org_name: orgName,
       system_id: systemId,
     })
     .onConflict((oc) =>
@@ -179,6 +194,7 @@ export async function promoteToLocal(githubFullName: string, localPath: string):
         github_full_name: githubFullName,
         last_scanned: now,
         scope,
+        org_name: orgName,
       }),
     )
     .execute();

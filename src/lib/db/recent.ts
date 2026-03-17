@@ -2,6 +2,7 @@ import { sql } from "kysely";
 import type { RecentEntry } from "../../types.ts";
 import { getMaxRecent } from "../settings.ts";
 import { getDb } from "./database.ts";
+import { ensureOrg, extractOrgName } from "./orgs.ts";
 import { getCurrentSystemId } from "./systems.ts";
 import { generateId } from "./uuid.ts";
 
@@ -16,8 +17,11 @@ export async function getRecentProjects(): Promise<RecentEntry[]> {
   const rows = await getDb()
     .selectFrom(latestHistory)
     .innerJoin("projects", "projects.id", "latest_history.project_id")
+    .innerJoin("orgs", "orgs.name", "projects.org_name")
     .select(["projects.path as path", "projects.name as name", "latest_history.last_opened as last_opened"])
     .where("projects.deleted_at", "is", null)
+    .where("orgs.hidden", "=", 0)
+    .where("orgs.deleted_at", "is", null)
     .orderBy("latest_history.last_opened", "desc")
     .limit(getMaxRecent())
     .execute();
@@ -35,6 +39,8 @@ export async function touchRecentProject(path: string, name: string, openedAt = 
     .executeTakeFirst();
 
   if (!project) {
+    const orgName = extractOrgName(undefined);
+    await ensureOrg(orgName);
     await db
       .insertInto("projects")
       .values({
@@ -46,6 +52,7 @@ export async function touchRecentProject(path: string, name: string, openedAt = 
         is_git_repo: 1,
         source: "local",
         scope: "personal",
+        org_name: orgName,
         system_id: systemId,
       })
       .execute();

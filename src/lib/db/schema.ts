@@ -32,6 +32,7 @@ export interface ProjectTable {
   source: Generated<string>;
   github_full_name: string | null;
   scope: Generated<string>;
+  org_name: Generated<string>;
   system_id: string;
 }
 
@@ -55,10 +56,19 @@ export interface ProjectDevConfigTable {
   system_id: string;
 }
 
+export interface OrgsTable {
+  name: string;
+  hidden: Generated<number>;
+  created_at: Generated<number>;
+  updated_at: Generated<number>;
+  deleted_at: number | null;
+}
+
 export interface DB {
   systems: SystemsTable;
   settings: SettingsTable;
   projects: ProjectTable;
   project_history: ProjectHistoryTable;
   project_dev_config: ProjectDevConfigTable;
+  orgs: OrgsTable;
 }

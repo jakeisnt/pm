@@ -3,6 +3,8 @@
 // External code should import from this file only.
 
 export { closeDatabase, getDb, getRawDb, runMigrationsFromDir } from "./database.ts";
+export type { Org } from "./orgs.ts";
+export { ensureOrg, extractOrgName, getOrgs, LOCAL_ORG, removeOrg, setOrgHidden } from "./orgs.ts";
 export type { DevConfig } from "./projects.ts";
 export {
   cleanupMissing,

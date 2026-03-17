@@ -112,5 +112,32 @@ config
     runConfigDelete(key);
   });
 
+// ─── p org ───────────────────────────────────────────────────────────────
+const org = program.command("org").description("Manage tracked orgs");
+
+org
+  .command("list")
+  .description("List all tracked orgs")
+  .action(async () => {
+    const { runOrgList } = await import("./commands/org/index.ts");
+    await runOrgList();
+  });
+
+org
+  .command("hide <name>")
+  .description("Hide an org from all project listings")
+  .action(async (name: string) => {
+    const { runOrgHide } = await import("./commands/org/index.ts");
+    await runOrgHide(name);
+  });
+
+org
+  .command("show <name>")
+  .description("Unhide an org so its projects appear again")
+  .action(async (name: string) => {
+    const { runOrgShow } = await import("./commands/org/index.ts");
+    await runOrgShow(name);
+  });
+
 // ─── Parse ───────────────────────────────────────────────────────────────
 program.parse();
