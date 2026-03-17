@@ -4,6 +4,7 @@ import { basename, resolve } from "node:path";
 import pc from "picocolors";
 import { getCachedProjects, getRecentProjects, removeProject } from "../../lib/db/index.ts";
 import { fuzzySelectProject } from "../../lib/fuzzy.ts";
+import { git } from "../../lib/github.ts";
 import { log } from "../../lib/log.ts";
 import { askLine } from "../../lib/prompt.ts";
 
@@ -34,6 +35,14 @@ async function selectProjectToRemove(pathArg?: string): Promise<{ path: string; 
 export async function runProjectRemove(pathArg?: string, opts?: { force?: boolean; delete?: boolean }): Promise<void> {
   const { path: target, name: projectName } = await selectProjectToRemove(pathArg);
   const deleteFromDisk = opts?.delete ?? true;
+
+  if (deleteFromDisk && existsSync(target)) {
+    const staged = git(["diff", "--cached", "--name-only"], target);
+    if (staged.ok && staged.stdout.trim().length > 0) {
+      log.error(`Project ${pc.cyan(projectName)} has staged changes. Commit or unstage them before deleting.`);
+      return;
+    }
+  }
 
   log.phase(`${deleteFromDisk ? "Delete" : "Untrack"} project: ${projectName}`);
   log.item(`Path: ${pc.dim(target)}`);
