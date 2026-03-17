@@ -11,17 +11,17 @@ import {
   touchProject,
   touchRecentProject,
   upsertProject,
-} from "../../lib/db/index.ts";
-import { findProjects } from "../../lib/find-projects.ts";
-import { fuzzyFilter } from "../../lib/fuzzy-match.ts";
-import { forceReindex, indexGithubRepos } from "../../lib/indexer.ts";
-import { log } from "../../lib/log.ts";
-import { SelectionCancelledError } from "../../lib/prompt.ts";
-import { getSearchDepth, getSearchRoots } from "../../lib/settings.ts";
-import { runCmd, spawnShell } from "../../lib/subprocess.ts";
-import type { TuiListItem } from "../../lib/tui.ts";
-import { tuiSelect } from "../../lib/tui.ts";
-import type { Project, RootsConfig, SelectOptions } from "../../types.ts";
+} from "../lib/db/index.ts";
+import { findProjects } from "../lib/find-projects.ts";
+import { fuzzyFilter } from "../lib/fuzzy-match.ts";
+import { forceReindex, indexGithubRepos } from "../lib/indexer.ts";
+import { log } from "../lib/log.ts";
+import { SelectionCancelledError } from "../lib/prompt.ts";
+import { getSearchDepth, getSearchRoots } from "../lib/settings.ts";
+import { runCmd, spawnShell } from "../lib/subprocess.ts";
+import type { TuiListItem } from "../lib/tui.ts";
+import { tuiSelect } from "../lib/tui.ts";
+import type { Project, RootsConfig, SelectOptions } from "../types.ts";
 
 function shortenPath(path: string): string {
   const home = homedir();

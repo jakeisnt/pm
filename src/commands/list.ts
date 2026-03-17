@@ -1,7 +1,7 @@
 import pc from "picocolors";
-import { getCachedProjects } from "../../lib/db/index.ts";
-import { log } from "../../lib/log.ts";
-import type { Project } from "../../types.ts";
+import { getCachedProjects } from "../lib/db/index.ts";
+import { log } from "../lib/log.ts";
+import type { Project } from "../types.ts";
 
 export async function runProjectList(opts: { source?: string; scope?: string; json?: boolean }): Promise<void> {
   const sourceFilter = opts.source as "local" | "github" | undefined;

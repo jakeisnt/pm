@@ -1,6 +1,6 @@
 import pc from "picocolors";
-import { getOrgs, setOrgHidden } from "../../lib/db/index.ts";
-import { log } from "../../lib/log.ts";
+import { getOrgs, setOrgHidden } from "../lib/db/index.ts";
+import { log } from "../lib/log.ts";
 
 export async function runOrgList(): Promise<void> {
   const orgs = await getOrgs();

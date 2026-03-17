@@ -28,7 +28,7 @@ program
   .action(async (name: string | undefined, opts: Record<string, unknown>) => {
     enableAbort();
     try {
-      const { runSelect } = await import("./commands/select/index.ts");
+      const { runSelect } = await import("./commands/select.ts");
       await runSelect({
         name,
         printPath: Boolean(opts["path"]),
@@ -70,7 +70,7 @@ program
   .option("--scope <scope>", "filter by scope (personal/work)")
   .option("--json", "output as JSON")
   .action(async (opts: { source?: string; scope?: string; json?: boolean }) => {
-    const { runProjectList } = await import("./commands/list/index.ts");
+    const { runProjectList } = await import("./commands/list.ts");
     await runProjectList(opts);
   });
 
@@ -80,7 +80,7 @@ program
   .description("Delete a project from disk (index entry persists until next GitHub refetch)")
   .option("-f, --force", "skip confirmation")
   .action(async (path: string | undefined, opts: { force?: boolean }) => {
-    const { runProjectRemove } = await import("./commands/remove/index.ts");
+    const { runProjectRemove } = await import("./commands/remove.ts");
     await runProjectRemove(path, opts);
   });
 
@@ -89,7 +89,7 @@ program
   .command("dev")
   .description("Run the current project's dev command")
   .action(async () => {
-    const { runProjectDev } = await import("./commands/dev/index.ts");
+    const { runProjectDev } = await import("./commands/dev.ts");
     await runProjectDev();
   });
 
@@ -100,7 +100,7 @@ config
   .command("list")
   .description("Show all settings")
   .action(async () => {
-    const { runConfigList } = await import("./commands/config/index.ts");
+    const { runConfigList } = await import("./commands/config.ts");
     runConfigList();
   });
 
@@ -109,7 +109,7 @@ config
   .description("Set a configuration value")
   .option("-d, --device", "scope to this device only")
   .action(async (key: string, value: string, opts: { device?: boolean }) => {
-    const { runConfigSet } = await import("./commands/config/index.ts");
+    const { runConfigSet } = await import("./commands/config.ts");
     runConfigSet(key, value, opts);
   });
 
@@ -117,7 +117,7 @@ config
   .command("delete <key>")
   .description("Delete a setting")
   .action(async (key: string) => {
-    const { runConfigDelete } = await import("./commands/config/index.ts");
+    const { runConfigDelete } = await import("./commands/config.ts");
     runConfigDelete(key);
   });
 
@@ -128,7 +128,7 @@ org
   .command("list")
   .description("List all tracked orgs")
   .action(async () => {
-    const { runOrgList } = await import("./commands/org/index.ts");
+    const { runOrgList } = await import("./commands/org.ts");
     await runOrgList();
   });
 
@@ -136,7 +136,7 @@ org
   .command("hide <name>")
   .description("Hide an org from all project listings")
   .action(async (name: string) => {
-    const { runOrgHide } = await import("./commands/org/index.ts");
+    const { runOrgHide } = await import("./commands/org.ts");
     await runOrgHide(name);
   });
 
@@ -144,7 +144,7 @@ org
   .command("show <name>")
   .description("Unhide an org so its projects appear again")
   .action(async (name: string) => {
-    const { runOrgShow } = await import("./commands/org/index.ts");
+    const { runOrgShow } = await import("./commands/org.ts");
     await runOrgShow(name);
   });
 
@@ -158,7 +158,7 @@ program
   .option("--clone-dir <dir>", "directory for cloning GitHub repos")
   .action(async (opts: Record<string, unknown>) => {
     try {
-      const { runGui } = await import("./commands/gui/index.ts");
+      const { runGui } = await import("./commands/gui.ts");
       await runGui({
         printPath: Boolean(opts["path"]),
         openCmd: opts["open"] as string | undefined,

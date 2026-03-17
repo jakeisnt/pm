@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getDevConfig, upsertDevConfig } from "../../lib/db/index.ts";
-import { log } from "../../lib/log.ts";
-import { runCmd } from "../../lib/subprocess.ts";
+import { getDevConfig, upsertDevConfig } from "../lib/db/index.ts";
+import { log } from "../lib/log.ts";
+import { runCmd } from "../lib/subprocess.ts";
 
 function detectPackageManager(dir: string): string | null {
   if (existsSync(join(dir, "bun.lock")) || existsSync(join(dir, "bun.lockb"))) return "bun";

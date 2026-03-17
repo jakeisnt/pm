@@ -1,7 +1,7 @@
 import pc from "picocolors";
-import { deleteSetting, getAllSettingsRaw, setSetting } from "../../lib/db/index.ts";
-import { log } from "../../lib/log.ts";
-import { SETTING_DEFS } from "../../lib/settings.ts";
+import { deleteSetting, getAllSettingsRaw, setSetting } from "../lib/db/index.ts";
+import { log } from "../lib/log.ts";
+import { SETTING_DEFS } from "../lib/settings.ts";
 
 export function runConfigList(): void {
   const raw = getAllSettingsRaw();

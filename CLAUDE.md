@@ -21,7 +21,7 @@ After every change: rebuild and relink (`bun install && bun link`), then run `p 
 - `src/index.ts` — CLI entry point with all command definitions (commander)
 - `src/types.ts` — Shared type definitions
 - `src/lib/` — Infrastructure: database, subprocess helpers, settings, etc.
-- `src/commands/` — One directory per command group, each with an `index.ts`
+- `src/commands/` — One file per command group (`<name>.ts`)
 
 ## Key Conventions
 
