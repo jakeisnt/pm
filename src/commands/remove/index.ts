@@ -33,7 +33,7 @@ async function selectProjectToRemove(pathArg?: string): Promise<{ path: string; 
 
 export async function runProjectRemove(pathArg?: string, opts?: { force?: boolean; delete?: boolean }): Promise<void> {
   const { path: target, name: projectName } = await selectProjectToRemove(pathArg);
-  const deleteFromDisk = opts?.delete ?? false;
+  const deleteFromDisk = opts?.delete ?? true;
 
   log.phase(`${deleteFromDisk ? "Delete" : "Untrack"} project: ${projectName}`);
   log.item(`Path: ${pc.dim(target)}`);
