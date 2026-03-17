@@ -32,6 +32,20 @@ program
     }
   });
 
+// ─── p resolve ───────────────────────────────────────────────────────────
+program
+  .command("resolve <name>")
+  .description("Resolve a project name or GitHub full name to its local path")
+  .action(async (name: string) => {
+    const { findProjectByName } = await import("./lib/project-select.ts");
+    const path = await findProjectByName(name);
+    if (path) {
+      process.stdout.write(path);
+    } else {
+      process.exitCode = 1;
+    }
+  });
+
 // ─── p list ──────────────────────────────────────────────────────────────
 program
   .command("list")
