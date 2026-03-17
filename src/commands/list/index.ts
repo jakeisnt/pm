@@ -15,7 +15,7 @@ export async function runProjectList(opts: { source?: string; scope?: string; js
   }
 
   if (opts.json) {
-    log.raw(JSON.stringify(filtered, null, 2));
+    process.stdout.write(JSON.stringify(filtered));
     return;
   }
 

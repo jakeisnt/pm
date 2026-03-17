@@ -1,0 +1,33 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "pm",
+  "title": "Project Manager",
+  "description": "Instantly switch to any project tracked by pm",
+  "icon": "command-icon.png",
+  "author": "jakeisnt",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "search-projects",
+      "title": "Search Projects",
+      "description": "Fuzzy search and open tracked projects",
+      "mode": "view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.93.2",
+    "@raycast/utils": "^1.19.1"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "22.13.14",
+    "@types/react": "19.0.12",
+    "eslint": "^9.23.0",
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "lint": "ray lint"
+  }
+}

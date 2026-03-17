@@ -6,7 +6,11 @@ import { SelectionCancelledError } from "./lib/prompt.ts";
 
 const program = new Command();
 
-program.name("p").description("Project manager — switch between projects quickly").version("0.1.0");
+program
+  .name("p")
+  .description("Project manager — switch between projects quickly")
+  .version("0.1.0")
+  .enablePositionalOptions();
 
 // ─── p (default): fuzzy select a project ─────────────────────────────────
 program
