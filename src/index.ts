@@ -139,5 +139,30 @@ org
     await runOrgShow(name);
   });
 
+// ─── p gui ──────────────────────────────────────────────────────────────
+program
+  .command("gui")
+  .description("Fuzzy-select a project in a fullscreen TUI")
+  .option("-p, --path", "print selected path to stdout")
+  .option("-o, --open <cmd>", "open with command (e.g. code, zed)")
+  .option("-s, --silent", "select without side effects")
+  .option("--clone-dir <dir>", "directory for cloning GitHub repos")
+  .action(async (opts: Record<string, unknown>) => {
+    try {
+      const { runGui } = await import("./commands/gui/index.ts");
+      await runGui({
+        printPath: Boolean(opts["path"]),
+        openCmd: opts["open"] as string | undefined,
+        silent: Boolean(opts["silent"]),
+        cloneDir: opts["cloneDir"] as string | undefined,
+      });
+    } catch (err) {
+      if (err instanceof (await import("./lib/prompt.ts")).SelectionCancelledError) {
+        return;
+      }
+      throw err;
+    }
+  });
+
 // ─── Parse ───────────────────────────────────────────────────────────────
 program.parse();
