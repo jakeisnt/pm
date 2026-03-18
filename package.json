@@ -17,6 +17,7 @@
     "@uln/cmd": "^0.1.0",
     "@uln/env": "^0.1.0",
     "@uln/log": "^0.1.0",
+    "@uln/prompts": "^0.1.0",
     "@uln/repo": "^0.1.0",
     "kysely": "^0.28.11",
     "kysely-bun-sqlite": "^0.4.0",
