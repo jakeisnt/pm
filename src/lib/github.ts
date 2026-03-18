@@ -1,6 +1,6 @@
-import type { ExecResult } from "@uln/cmd";
-import { exec } from "@uln/cmd";
 import { checkAbort } from "./abort.ts";
+import type { ExecResult } from "./exec.ts";
+import { exec } from "./exec.ts";
 
 export type RunResult = ExecResult;
 

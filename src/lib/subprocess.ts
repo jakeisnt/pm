@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
-import type { ExecResult } from "@uln/cmd";
-import { exec, execInherit, execInheritAsync, execShell } from "@uln/cmd";
 import { checkAbort, trackProcess } from "./abort.ts";
 import { getShell } from "./config/index.ts";
+import type { ExecResult } from "./exec.ts";
+import { exec, execInherit, execInheritAsync, execShell } from "./exec.ts";
 
 export type RunResult = ExecResult;
 
