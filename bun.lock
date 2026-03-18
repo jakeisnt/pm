@@ -8,7 +8,7 @@
         "@uln/cmd": "^0.1.0",
         "@uln/env": "^0.1.0",
         "@uln/log": "^0.1.0",
-        "@uln/prompts": "link:@uln/prompts",
+        "@uln/prompts": "^0.1.0",
         "@uln/repo": "^0.1.0",
         "kysely": "^0.28.11",
         "kysely-bun-sqlite": "^0.4.0",
@@ -107,7 +107,7 @@
 
     "@uln/log": ["@uln/log@0.1.0", "", { "peerDependencies": { "picocolors": "^1.1.1" } }, "sha512-W+cw+JsHftL/1khDbf/xrqGDv03TyERVMIhT7sO7scJGSxUT6KnR/NtWbxorn47eWYlu5JpaqPcJO3AcvxGTAA=="],
 
-    "@uln/prompts": ["@uln/prompts@link:@uln/prompts", {}],
+    "@uln/prompts": ["@uln/prompts@0.1.0", "", {}, "sha512-p+3QHg2LxLRTGf1DYh+6LHYjkZJQvV2t6VuE8F2WbirTo2bXiwnuGKY46ri7XsRn0wmYrMSuesHa3JAnGwucyA=="],
 
     "@uln/repo": ["@uln/repo@0.1.0", "", { "dependencies": { "@uln/log": "workspace:*", "octokit": "^5.0.0", "zod": "^4.0.0" } }, "sha512-O+pYxrLfUx0txXiQSqHMkUFx6nJINUFOKuNaZtvuwf9ndQWsuZdpqqTkk1+hCU8+nse5UVPBdewudrF44WU81w=="],
 
