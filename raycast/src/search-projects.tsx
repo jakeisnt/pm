@@ -77,13 +77,15 @@ function ProjectItem({ project }: { project: Project }) {
                   const fullName = project.githubFullName as string;
                   await showToast({ style: Toast.Style.Animated, title: `Cloning ${fullName}…` });
                   try {
-                    const clonedPath = execSync(`${BUN_BIN} run ${P_BIN} ${JSON.stringify(fullName)} --path`, {
-                      encoding: "utf-8",
-                      timeout: 120_000,
-                      env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? "/usr/bin:/bin"}` },
-                    }).trim();
+                    execSync(
+                      `${BUN_BIN} run ${P_BIN} ${JSON.stringify(fullName)} --app Ghostty`,
+                      {
+                        encoding: "utf-8",
+                        timeout: 120_000,
+                        env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? "/usr/bin:/bin"}` },
+                      },
+                    );
                     await showToast({ style: Toast.Style.Success, title: "Cloned", message: fullName });
-                    execSync(`open -a Ghostty ${JSON.stringify(clonedPath)}`);
                   } catch (err) {
                     await showToast({
                       style: Toast.Style.Failure,

@@ -23,6 +23,7 @@ export interface RecentEntry {
 
 export interface SelectOptions {
   openCmd?: string | undefined;
+  openApp?: string | undefined;
   printPath: boolean;
   silent?: boolean | undefined;
   name?: string | undefined;

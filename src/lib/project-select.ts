@@ -137,6 +137,8 @@ export async function runProjectSelect(
     // Return path without any side effects
   } else if (options.printPath) {
     process.stdout.write(targetPath);
+  } else if (options.openApp) {
+    runCmd("open", ["-a", options.openApp, targetPath], targetPath);
   } else if (options.openCmd) {
     runCmd(options.openCmd, [targetPath], targetPath);
   } else {
@@ -146,7 +148,7 @@ export async function runProjectSelect(
   // Reindex in background after selection — but skip when running non-interactively
   // (printPath/silent) because these fire-and-forget promises keep the process alive,
   // blocking callers like Raycast that wait for process exit via execSync.
-  if (!options.printPath && !options.silent) {
+  if (!options.printPath && !options.silent && !options.openApp) {
     forceReindex(config).catch(() => {});
     indexGithubRepos().catch(() => {});
   }

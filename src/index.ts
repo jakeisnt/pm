@@ -36,6 +36,7 @@ program
   .argument("[name]", "project name to match directly")
   .option("-p, --path", "print selected path to stdout")
   .option("-o, --open <cmd>", "open with command (e.g. code, zed)")
+  .option("-a, --app <name>", "open with macOS app (e.g. Ghostty, Finder)")
   .option("-s, --silent", "select without side effects")
   .option("--clone-dir <dir>", "directory for cloning GitHub repos")
   .option("--json", "output project list as JSON")
@@ -47,6 +48,7 @@ program
         name,
         printPath: Boolean(opts["path"]),
         openCmd: opts["open"] as string | undefined,
+        openApp: opts["app"] as string | undefined,
         silent: Boolean(opts["silent"]),
         cloneDir: opts["cloneDir"] as string | undefined,
         json: Boolean(opts["json"]),
