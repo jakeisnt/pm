@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Action, ActionPanel, Icon, List, Toast, open, showToast } from "@raycast/api";
+import { Action, ActionPanel, Icon, List, Toast, showToast } from "@raycast/api";
 import { useExec } from "@raycast/utils";
 
 interface Project {
@@ -83,7 +83,7 @@ function ProjectItem({ project }: { project: Project }) {
                       env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH ?? "/usr/bin:/bin"}` },
                     }).trim();
                     await showToast({ style: Toast.Style.Success, title: "Cloned", message: fullName });
-                    await open(clonedPath, "Ghostty");
+                    execSync(`open -a Ghostty ${JSON.stringify(clonedPath)}`);
                   } catch (err) {
                     await showToast({
                       style: Toast.Style.Failure,
