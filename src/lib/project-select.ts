@@ -117,11 +117,15 @@ export async function runProjectSelect(
       if (!owner || !repo) throw new Error(`Invalid GitHub full name: ${fullName}`);
       targetPath = join(cloneDir, owner, repo);
       await promoteToLocal(fullName, targetPath);
-      const cloneSpinner = createSpinner(`Cloning ${fullName}...`).start();
-      const cloneResult = cloneGithubRepo(fullName, cloneDir);
-      cloneSpinner.success({
-        text: cloneResult.alreadyExisted ? `Found local clone of ${fullName}` : `Cloned ${fullName}`,
-      });
+      if (options.printPath || options.silent) {
+        cloneGithubRepo(fullName, cloneDir);
+      } else {
+        const cloneSpinner = createSpinner(`Cloning ${fullName}...`).start();
+        const cloneResult = cloneGithubRepo(fullName, cloneDir);
+        cloneSpinner.success({
+          text: cloneResult.alreadyExisted ? `Found local clone of ${fullName}` : `Cloned ${fullName}`,
+        });
+      }
     }
   }
 
@@ -139,11 +143,13 @@ export async function runProjectSelect(
     spawnShell(targetPath);
   }
 
-  // Reindex in background after selection — forceReindex uses sync FS APIs
-  // (readdirSync/readFileSync) which block the event loop before the first await,
-  // so calling it before selection would delay the selector from appearing.
-  forceReindex(config).catch(() => {});
-  indexGithubRepos().catch(() => {});
+  // Reindex in background after selection — but skip when running non-interactively
+  // (printPath/silent) because these fire-and-forget promises keep the process alive,
+  // blocking callers like Raycast that wait for process exit via execSync.
+  if (!options.printPath && !options.silent) {
+    forceReindex(config).catch(() => {});
+    indexGithubRepos().catch(() => {});
+  }
 
   return targetPath;
 }
