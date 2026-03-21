@@ -17,6 +17,7 @@ import {
   upsertDevConfig,
 } from "./lib/db/index.ts";
 import { git } from "./lib/github.ts";
+import { runIndexing } from "./lib/indexer.ts";
 import { log } from "./lib/log.ts";
 import { findProjectByName, fuzzySelectProject, runProjectSelect } from "./lib/project-select.ts";
 import { askLine, SelectionCancelledError } from "./lib/prompt.ts";
@@ -84,6 +85,9 @@ program
   .option("--scope <scope>", "filter by scope (personal/work)")
   .option("--json", "output as JSON")
   .action(async (opts: { source?: string; scope?: string; json?: boolean }) => {
+    const { searchRoots: roots, searchDepth: depth } = loadConfig();
+    await runIndexing({ roots, maxDepth: depth });
+
     const sourceFilter = opts.source as "local" | "github" | undefined;
     const projects = await getCachedProjects(sourceFilter);
 

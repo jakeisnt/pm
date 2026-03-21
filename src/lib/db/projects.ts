@@ -213,6 +213,7 @@ export async function cleanupNotOnGithub(githubFullNames: Set<string>): Promise<
     .selectFrom("projects")
     .select(["id", "github_full_name"])
     .where("deleted_at", "is", null)
+    .where("source", "=", "github")
     .where("github_full_name", "is not", null)
     .execute();
   const toDelete = rows.filter((r) => !githubFullNames.has(r.github_full_name as string));
