@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { _resetForTesting } from "./database.ts";
 import { ensureOrg, getOrgs, removeOrg, setOrgHidden } from "./orgs.ts";
 import {
+  cleanupNotOnGithub,
   getCachedProjects,
   getProjectsCount,
   removeProject,
@@ -171,6 +172,96 @@ describe("projects", () => {
     expect(await getProjectsCount()).toBe(2);
     await removeProject("/tmp/a");
     expect(await getProjectsCount()).toBe(1);
+  });
+});
+
+// ─── cleanupNotOnGithub ──────────────────────────────────────────────────
+
+describe("cleanupNotOnGithub", () => {
+  test("soft-deletes github-only projects not in the provided set", async () => {
+    await upsertProject({
+      path: "github://owner/kept",
+      name: "kept",
+      source: "github",
+      githubFullName: "owner/kept",
+    });
+    await upsertProject({
+      path: "github://owner/removed",
+      name: "removed",
+      source: "github",
+      githubFullName: "owner/removed",
+    });
+
+    await cleanupNotOnGithub(new Set(["owner/kept"]));
+
+    const projects = await getCachedProjects();
+    expect(projects.find((p) => p.name === "kept")).toBeDefined();
+    expect(projects.find((p) => p.name === "removed")).toBeUndefined();
+  });
+
+  test("does NOT delete local projects whose github_full_name is missing from the set", async () => {
+    // Regression: cleanupNotOnGithub previously queried all projects with
+    // a github_full_name, including local clones. Local clones of repos
+    // not owned by the user would get soft-deleted during GitHub reindex.
+    await upsertProject({
+      path: "/home/user/projects/someone-elses-repo",
+      name: "someone-elses-repo",
+      source: "local",
+      githubFullName: "other-owner/someone-elses-repo",
+    });
+    await upsertProject({
+      path: "github://myorg/my-repo",
+      name: "my-repo",
+      source: "github",
+      githubFullName: "myorg/my-repo",
+    });
+
+    // GitHub API only returns myorg/my-repo — other-owner/someone-elses-repo is NOT in the set
+    await cleanupNotOnGithub(new Set(["myorg/my-repo"]));
+
+    const projects = await getCachedProjects();
+    const local = projects.find((p) => p.path === "/home/user/projects/someone-elses-repo");
+    expect(local).toBeDefined();
+    expect(local?.source).toBe("local");
+  });
+
+  test("does NOT delete local projects even when github set is empty", async () => {
+    await upsertProject({
+      path: "/home/user/projects/forked-repo",
+      name: "forked-repo",
+      source: "local",
+      githubFullName: "upstream/forked-repo",
+    });
+
+    await cleanupNotOnGithub(new Set());
+
+    const projects = await getCachedProjects();
+    expect(projects.find((p) => p.name === "forked-repo")).toBeDefined();
+  });
+
+  test("only deletes github source projects when both local and github entries share the same github_full_name", async () => {
+    // A project can exist as both a github placeholder and a local clone
+    await upsertProject({
+      path: "github://myorg/dual-repo",
+      name: "dual-repo",
+      source: "github",
+      githubFullName: "myorg/dual-repo",
+    });
+    await upsertProject({
+      path: "/home/user/projects/dual-repo",
+      name: "dual-repo",
+      source: "local",
+      githubFullName: "myorg/dual-repo",
+    });
+
+    // Simulate: myorg/dual-repo is no longer on GitHub
+    await cleanupNotOnGithub(new Set());
+
+    const projects = await getCachedProjects();
+    const local = projects.find((p) => p.path === "/home/user/projects/dual-repo");
+    const github = projects.find((p) => p.path === "github://myorg/dual-repo");
+    expect(local).toBeDefined();
+    expect(github).toBeUndefined();
   });
 });
 
