@@ -38,6 +38,7 @@ export async function ensureOrg(name: string): Promise<void> {
 
 export async function setOrgHidden(name: string, hidden: boolean): Promise<boolean> {
   const normalized = name.toLowerCase();
+  if (normalized === LOCAL_ORG) return false;
   // Ensure org exists first
   await ensureOrg(normalized);
   const result = await getDb()

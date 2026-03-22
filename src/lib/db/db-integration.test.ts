@@ -265,6 +265,60 @@ describe("cleanupNotOnGithub", () => {
   });
 });
 
+// ─── upsert resilience ──────────────────────────────────────────────────
+
+describe("upsert resilience", () => {
+  test("upsert revives a soft-deleted project found again on disk", async () => {
+    await upsertProject({ path: "/tmp/revive", name: "revive", source: "local" });
+    await removeProject("/tmp/revive");
+    expect((await getCachedProjects()).find((p) => p.path === "/tmp/revive")).toBeUndefined();
+
+    // Re-discovered during filesystem scan
+    await upsertProject({ path: "/tmp/revive", name: "revive", source: "local" });
+    expect((await getCachedProjects()).find((p) => p.path === "/tmp/revive")).toBeDefined();
+  });
+
+  test("upsert does not downgrade github_full_name to null", async () => {
+    await upsertProject({
+      path: "/tmp/gh-proj",
+      name: "gh-proj",
+      source: "local",
+      githubFullName: "owner/gh-proj",
+    });
+
+    // Rescan finds the project but fails to extract github name
+    await upsertProject({ path: "/tmp/gh-proj", name: "gh-proj", source: "local" });
+
+    const projects = await getCachedProjects();
+    const found = projects.find((p) => p.path === "/tmp/gh-proj");
+    expect(found?.githubFullName).toBe("owner/gh-proj");
+  });
+
+  test("upsert does not downgrade org_name to _local", async () => {
+    await upsertProject({
+      path: "/tmp/org-proj",
+      name: "org-proj",
+      source: "local",
+      githubFullName: "myorg/org-proj",
+    });
+
+    // Rescan finds the project but fails to extract github name → org falls back to _local
+    await upsertProject({ path: "/tmp/org-proj", name: "org-proj", source: "local" });
+
+    // Project should still be visible (not silently moved to _local)
+    const projects = await getCachedProjects();
+    const found = projects.find((p) => p.path === "/tmp/org-proj");
+    expect(found).toBeDefined();
+  });
+
+  test("setOrgHidden refuses to hide _local org", async () => {
+    const result = await setOrgHidden("_local", true);
+    expect(result).toBe(false);
+    const orgs = await getOrgs();
+    expect(orgs.find((o) => o.name === "_local")?.hidden).toBe(false);
+  });
+});
+
 // ─── Recent ──────────────────────────────────────────────────────────────
 
 describe("recent", () => {

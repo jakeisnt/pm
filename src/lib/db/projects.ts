@@ -125,10 +125,20 @@ export async function upsertProjects(projects: Project[]): Promise<void> {
         oc.column("path").doUpdateSet({
           name: (eb) => eb.ref("excluded.name"),
           last_scanned: now,
+          deleted_at: null,
           source: (eb) => eb.ref("excluded.source"),
-          github_full_name: (eb) => eb.ref("excluded.github_full_name"),
+          // Prefer non-null github_full_name: keep existing value when new scan returns null
+          github_full_name: (eb) =>
+            eb.fn.coalesce(eb.ref("excluded.github_full_name"), eb.ref("projects.github_full_name")),
           scope: (eb) => eb.ref("excluded.scope"),
-          org_name: (eb) => eb.ref("excluded.org_name"),
+          // Prefer real org over _local: keep existing org when new scan falls back to _local
+          org_name: (eb) =>
+            eb
+              .case()
+              .when("excluded.org_name", "=", "_local")
+              .then(eb.ref("projects.org_name"))
+              .else(eb.ref("excluded.org_name"))
+              .end(),
         }),
       )
       .execute();
