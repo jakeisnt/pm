@@ -22,7 +22,7 @@ function throwDatabaseAccessError(dbPath: string, cause: unknown): never {
       "",
       '  "sandbox": {',
       '    "filesystem": {',
-      '      "allowWrite": ["~/Library/Application Support/pm"]',
+      `      "allowWrite": ["${dbPath}"]`,
       "    }",
       "  }",
     );
@@ -98,7 +98,7 @@ function initRawDb(): Database {
   try {
     dbPath = getDbPath();
   } catch (e: unknown) {
-    throwDatabaseAccessError("~/Library/Application Support/pm/pm.db", e);
+    throwDatabaseAccessError("pm data directory", e);
   }
 
   try {

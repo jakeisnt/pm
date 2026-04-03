@@ -55,7 +55,6 @@ export function getAppDir(): string {
 
 /** Ensure the database directory exists and return the database file path. */
 export function getDbPath(): string {
-  const dir = join(homedir(), "Library", "Application Support", "pm");
-  mkdirSync(dir, { recursive: true });
+  const dir = getAppDir();
   return join(dir, "pm.db");
 }

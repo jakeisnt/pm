@@ -138,7 +138,11 @@ export async function runProjectSelect(
   } else if (options.printPath) {
     process.stdout.write(targetPath);
   } else if (options.openApp) {
-    runCmd("open", ["-a", options.openApp, targetPath], targetPath);
+    if (process.platform === "darwin") {
+      runCmd("open", ["-a", options.openApp, targetPath], targetPath);
+    } else {
+      runCmd(options.openApp, [targetPath], targetPath);
+    }
   } else if (options.openCmd) {
     runCmd(options.openCmd, [targetPath], targetPath);
   } else {
