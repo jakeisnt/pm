@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 // ─── Time intervals ──────────────────────────────────────────────────────
-/** Reindex local projects after 1 hour. */
-export const REINDEX_INTERVAL_MS = 3_600_000;
+/** Reindex local projects after 5 minutes. */
+export const REINDEX_INTERVAL_MS = 300_000;
 /** Reindex GitHub projects after 4 hours. */
 export const GITHUB_REINDEX_INTERVAL_MS = 3_600_000 * 4;
 
