@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { cloneGithubRepo, isGithubPlaceholder } from "@uln/repo";
+import { cloneGithubRepo } from "@uln/repo";
 import { createSpinner } from "nanospinner";
 import type { Project, RootsConfig, SelectOptions } from "../types.ts";
 import {
@@ -17,6 +17,10 @@ import { forceReindex, indexGithubRepos } from "./indexer.ts";
 import { log } from "./log.ts";
 import { fzfSelect } from "./prompt.ts";
 import { runCmd, spawnShell } from "./subprocess.ts";
+
+function isGithubPlaceholder(path: string): boolean {
+  return path.startsWith("github://");
+}
 
 function formatProject(p: Project): string {
   if (p.source === "github") {

@@ -17,14 +17,10 @@ function throwDatabaseAccessError(dbPath: string, cause: unknown): never {
   const lines = [`Failed to open database: ${dbPath}`, ""];
   if (isPermission) {
     lines.push(
-      "This looks like a permissions issue. If you're running inside Claude Code,",
-      "the sandbox may be blocking access. Add this to ~/.claude/settings.json:",
+      "This looks like a permissions issue.",
+      "Ensure your terminal or coding agent has write access to the database path:",
       "",
-      '  "sandbox": {',
-      '    "filesystem": {',
-      `      "allowWrite": ["${dbPath}"]`,
-      "    }",
-      "  }",
+      `  ${dbPath}`,
     );
   } else {
     lines.push(`Error: ${msg}`);

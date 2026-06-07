@@ -1,4 +1,4 @@
-import { fetchGithubRepos, getOctokit, toGithubPlaceholder } from "@uln/repo";
+import { fetchGithubRepos, getOctokit } from "@uln/repo";
 import type { RootsConfig } from "../types.ts";
 import { GH_REPO_LIST_LIMIT } from "./config/index.ts";
 import { cleanupNotOnGithub, getDb, needsGithubReindex, needsReindex, upsertProjects } from "./db/index.ts";
@@ -19,6 +19,10 @@ export async function indexGithubRepos(): Promise<void> {
   getDb();
   if (!(await needsGithubReindex())) return;
   await forceGithubReindex();
+}
+
+function toGithubPlaceholder(nameWithOwner: string): string {
+  return `github://${nameWithOwner}`;
 }
 
 export async function forceGithubReindex(): Promise<void> {
