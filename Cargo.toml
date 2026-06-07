@@ -1,0 +1,21 @@
+[package]
+name = "pm"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.91.0"
+
+[[bin]]
+name = "p"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.100"
+clap = { version = "4.6.1", features = ["derive"] }
+directories = "6.0.0"
+fuzzy-matcher = "0.3.7"
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+uuid = { version = "1.23.2", features = ["v4"] }
+walkdir = "2.5.0"

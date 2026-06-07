@@ -1,72 +1,62 @@
 # pm
 
-A fast project manager CLI for switching between repositories, tracking recent projects, and organizing work across GitHub orgs.
-
-Built with [Bun](https://bun.sh) and TypeScript.
+A fast Rust project manager CLI for switching between repositories, tracking recent projects, and organizing work across GitHub orgs.
 
 ## Install
 
 ```bash
-bun install -g pm
+cargo install --path .
 ```
 
-Or clone and link locally:
+The CLI binary is `p`.
+
+## Development
+
+This repository pins Rust in `rust-toolchain.toml`.
 
 ```bash
-git clone https://github.com/jakeisnt/pm.git
-cd pm
-bun install
-bun link
+cargo build
+cargo test
+cargo clippy -- -D warnings
+cargo fmt --check
 ```
-
-The CLI is available as `p`.
 
 ## Usage
 
 ```bash
-# Interactive project switcher (builtin fuzzy search)
+# Interactive project switcher
 p
+
+# Resolve a project path
+p resolve pm
 
 # List all projects
 p list
-
-# List as JSON (useful for scripting / Raycast)
 p list --json
-
-# Filter by source
 p list --source local
-p list --source github
 
-# Reindex local projects from configured roots
-p reindex
+# Remove a project from disk
+p remove /path/to/project --force
 
-# Manage GitHub orgs
+# Manage org visibility
 p org list
 p org hide <org>
 p org show <org>
 
-# Configure settings
+# Manage config.json
 p config list
-p config set <key> <value>
-p config delete <key>
+p config set searchDepth 3
+p config delete searchDepth
 ```
 
 ## Configuration
 
-pm uses a SQLite database for all state and settings. Configure work/personal scope detection:
+`config.json` in the current checkout supports:
 
-```bash
-# Set which GitHub orgs are considered "work"
-p config set work_orgs "acme,my-company"
+- `searchRoots`: array of directories to scan for Git repositories
+- `searchDepth`: recursion depth for project discovery
 
-# Set which path prefixes are considered "work"
-p config set work_path_prefixes "/home/user/work,/Users/user/company"
-```
-
-## Requirements
-
-- [Bun](https://bun.sh) runtime
-- [gh](https://cli.github.com/) CLI for GitHub integration (optional)
+Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`).
 
 ## License
 
