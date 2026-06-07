@@ -2,16 +2,16 @@ import { createEnv } from "@uln/env";
 import { z } from "zod";
 
 export const env = createEnv({
-  SHELL: { schema: z.string(), fallback: "/bin/bash" },
-  EDITOR: { schema: z.string(), fallback: "cursor" },
+  SHELL: { type: z.string(), fallback: "/bin/bash" },
+  EDITOR: { type: z.string(), fallback: "cursor" },
 });
 
 /** User's default shell, falls back to /bin/bash. */
 export function getShell(): string {
-  return env.SHELL;
+  return env["SHELL"] as string;
 }
 
 /** User's preferred editor, falls back to cursor. */
 export function getEditor(): string {
-  return env.EDITOR;
+  return env["EDITOR"] as string;
 }
