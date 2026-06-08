@@ -6,6 +6,7 @@ mod project;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, OrgCmd};
+use colored::{Color, Colorize};
 use inquire::Confirm;
 use project::Project;
 use regex::Regex;
@@ -16,7 +17,7 @@ use std::{collections::BTreeMap, env, fs, io::Cursor, path::PathBuf, process::Co
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
-        eprintln!("error: {e:#}");
+        eprintln!("{} {e:#}", "error:".red().bold());
         std::process::exit(1);
     }
 }
@@ -159,6 +160,18 @@ fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {
     Ok(home.join("Documents").join(owner).join(repo))
 }
 
+fn style_scope(scope: &str) -> colored::ColoredString {
+    scope.bold().color(Color::BrightCyan)
+}
+
+fn style_name(name: &str) -> colored::ColoredString {
+    name.bold().color(Color::BrightGreen)
+}
+
+fn style_path(path: &str) -> colored::ColoredString {
+    path.dimmed()
+}
+
 fn choose(ps: Vec<Project>) -> Result<Project> {
     if ps.is_empty() {
         bail!("no projects found")
@@ -166,12 +179,12 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
 
     let input = ps
         .iter()
-        .map(|p| format!("{}\t{}\t{}", p.name, p.path, p.id))
+        .map(|p| format!("{}\t{}\t{}", style_name(&p.name), style_path(&p.path), p.id))
         .collect::<Vec<_>>()
         .join("\n");
 
     let options = SkimOptionsBuilder::default()
-        .prompt("Select project> ")
+        .prompt(format!("{} ", "Select project>".bright_cyan().bold()))
         .height("80%")
         .reverse(true)
         .border(BorderType::Rounded)
@@ -179,7 +192,7 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
         .delimiter(Regex::new("\t").context("failed to configure project selector delimiter")?)
         .build()
         .context("failed to configure project selector")?;
-    let item_reader = SkimItemReader::new(SkimItemReaderOption::default());
+    let item_reader = SkimItemReader::new(SkimItemReaderOption::default().ansi(true));
     let items = item_reader.of_bufread(Cursor::new(input));
     let output = Skim::run_with(options, Some(items))
         .map_err(|err| anyhow::anyhow!("failed to run project selector: {err}"))?;
@@ -249,9 +262,9 @@ async fn list(
                 .push(p);
         }
         for (g, items) in groups {
-            println!("{g}");
+            println!("{}", style_scope(&g));
             for p in items {
-                println!("  {}  {}", p.name, p.path);
+                println!("  {}  {}", style_name(&p.name), style_path(&p.path));
             }
         }
     }
@@ -261,7 +274,12 @@ async fn list(
 fn remove_cmd(path: Option<String>, force: bool) -> Result<()> {
     let p = path.map(PathBuf::from).unwrap_or(env::current_dir()?);
     if !force {
-        eprintln!("refusing to delete without --force: {}", p.display());
+        eprintln!(
+            "{} refusing to delete without {}: {}",
+            "warning:".yellow().bold(),
+            "--force".bold(),
+            p.display().to_string().dimmed()
+        );
         return Ok(());
     }
     fs::remove_dir_all(&p)?;
@@ -307,7 +325,11 @@ async fn org_cmd(db: &SqlitePool, cmd: OrgCmd) -> Result<()> {
     match cmd {
         OrgCmd::List => {
             for (n, h) in db::orgs(db).await? {
-                println!("{}{}", n, if h != 0 { " (hidden)" } else { "" });
+                if h != 0 {
+                    println!("{} {}", style_name(&n), "(hidden)".yellow());
+                } else {
+                    println!("{}", style_name(&n));
+                }
             }
         }
         OrgCmd::Hide { name } => db::set_org_hidden(db, name, true).await?,
