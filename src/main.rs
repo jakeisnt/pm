@@ -6,13 +6,16 @@ mod project;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, OrgCmd};
-use inquire::{
-    Confirm, Select,
-    ui::{RenderConfig, StyleSheet, Styled},
-};
+use inquire::Confirm;
 use project::Project;
 use sqlx::SqlitePool;
-use std::{collections::BTreeMap, env, fs, path::PathBuf, process::Command};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 #[tokio::main]
 async fn main() {
@@ -154,18 +157,44 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
         bail!("no projects found")
     }
 
-    let render_config = RenderConfig {
-        highlighted_option_prefix: Styled::new("›").with_fg(inquire::ui::Color::LightCyan),
-        selected_option: Some(StyleSheet::new().with_fg(inquire::ui::Color::LightGreen)),
-        ..Default::default()
-    };
+    let mut fzf = Command::new("fzf")
+        .args([
+            "--prompt=Select project> ",
+            "--height=80%",
+            "--layout=reverse",
+            "--border",
+            "--with-nth=1,2",
+            "--delimiter=\t",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("failed to launch fzf; install fzf to use interactive project selection")?;
 
-    Select::new("Select project", ps)
-        .with_help_message("Use ↑/↓ to move, type to filter, Enter to select")
-        .with_page_size(20)
-        .with_render_config(render_config)
-        .prompt()
-        .context("project selection cancelled")
+    {
+        let stdin = fzf.stdin.as_mut().context("failed to open fzf stdin")?;
+        for p in &ps {
+            writeln!(stdin, "{}\t{}\t{}", p.name, p.path, p.id)?;
+        }
+    }
+
+    let output = fzf
+        .wait_with_output()
+        .context("failed to read fzf selection")?;
+    if !output.status.success() {
+        bail!("project selection cancelled");
+    }
+
+    let selected = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;
+    let id = selected
+        .trim_end_matches(['\r', '\n'])
+        .rsplit('\t')
+        .next()
+        .context("fzf returned an invalid selection")?;
+
+    ps.into_iter()
+        .find(|p| p.id == id)
+        .context("selected project no longer exists")
 }
 
 fn spawn_shell_in(path: &str) -> Result<()> {
