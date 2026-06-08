@@ -27,3 +27,4 @@ Rust is pinned in `rust-toolchain.toml`; do not change the toolchain casually.
 - Use `rusqlite` for SQLite access.
 - Keep runtime state out of git.
 - Run `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` after changes.
+- After every update, completely rebuild and reinstall with `cargo clean && cargo build && cargo install --path .`.

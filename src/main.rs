@@ -100,7 +100,28 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
 
 fn spawn_shell_in(path: &str) -> Result<()> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    Command::new(shell).current_dir(path).status()?;
+    let shell_path = PathBuf::from(&shell);
+    let shell_name = shell_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("sh");
+
+    let mut command = Command::new(&shell);
+    if shell_name == "fish" {
+        command
+            .arg("-c")
+            .arg("cd $argv[1]; and exec $argv[2]")
+            .arg(path)
+            .arg(&shell);
+    } else {
+        command
+            .arg("-c")
+            .arg("cd \"$1\" && exec \"$2\" -l")
+            .arg("p")
+            .arg(path)
+            .arg(&shell);
+    }
+    command.status()?;
     Ok(())
 }
 
