@@ -29,6 +29,7 @@ async fn run() -> Result<()> {
     match cli.command {
         Some(Commands::Resolve { name }) => {
             if let Some(p) = db::find_project(&pool, &name).await? {
+                let p = ensure_local_project(&pool, p).await?;
                 print!("{}", p.path);
             } else if let Some(p) = maybe_clone_github_repo(&pool, &name).await? {
                 print!("{}", p.path);
@@ -59,13 +60,13 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
 
     let p = if let Some(n) = cli.name {
         match db::find_project(db, &n).await? {
-            Some(p) => p,
+            Some(p) => ensure_local_project(db, p).await?,
             None => maybe_clone_github_repo(db, &n)
                 .await?
                 .context("no matching project")?,
         }
     } else {
-        choose(ps)?
+        ensure_local_project(db, choose(ps)?).await?
     };
     db::touch(db, &p).await?;
 
@@ -81,6 +82,16 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
         spawn_shell_in(&p.path)?;
     }
     Ok(())
+}
+
+async fn ensure_local_project(db: &SqlitePool, project: Project) -> Result<Project> {
+    let Some(name) = project.path.strip_prefix("github://") else {
+        return Ok(project);
+    };
+
+    maybe_clone_github_repo(db, name)
+        .await?
+        .with_context(|| format!("{} is not available locally", project.path))
 }
 
 async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<Project>> {
