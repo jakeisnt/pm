@@ -33,7 +33,7 @@ fn now() -> i64 {
         .as_millis() as i64
 }
 
-async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
+pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
     let name = path.file_name().unwrap().to_string_lossy();
     let t = now();
     sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,scope,org_name) VALUES(?1,?2,?3,?4,?4,1,?4,?4,'local','personal','_local') ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,source='local',updated_at=excluded.updated_at,deleted_at=NULL")

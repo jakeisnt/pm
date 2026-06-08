@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, OrgCmd};
 use inquire::{
-    Select,
+    Confirm, Select,
     ui::{RenderConfig, StyleSheet, Styled},
 };
 use project::Project;
@@ -30,6 +30,8 @@ async fn run() -> Result<()> {
     match cli.command {
         Some(Commands::Resolve { name }) => {
             if let Some(p) = db::find_project(&pool, &name).await? {
+                print!("{}", p.path);
+            } else if let Some(p) = maybe_clone_github_repo(&pool, &name).await? {
                 print!("{}", p.path);
             } else {
                 std::process::exit(1);
@@ -57,9 +59,12 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
     }
 
     let p = if let Some(n) = cli.name {
-        db::find_project(db, &n)
-            .await?
-            .context("no matching project")?
+        match db::find_project(db, &n).await? {
+            Some(p) => p,
+            None => maybe_clone_github_repo(db, &n)
+                .await?
+                .context("no matching project")?,
+        }
     } else {
         choose(ps)?
     };
@@ -77,6 +82,71 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
         spawn_shell_in(&p.path)?;
     }
     Ok(())
+}
+
+async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<Project>> {
+    let Some((owner, repo)) = name.split_once('/') else {
+        return Ok(None);
+    };
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return Ok(None);
+    }
+
+    let repo_info = octocrab::instance()
+        .repos(owner, repo)
+        .get()
+        .await
+        .with_context(|| format!("GitHub repository not found: {owner}/{repo}"))?;
+    let full_name = repo_info
+        .full_name
+        .clone()
+        .unwrap_or_else(|| format!("{owner}/{repo}"));
+    let target = github_checkout_path(owner, repo)?;
+
+    if target.exists() {
+        db::upsert_project(db, &target).await?;
+        return db::find_project(db, repo).await;
+    }
+
+    let prompt = format!(
+        "{full_name} is not available locally. Clone it to {}?",
+        target.display()
+    );
+    if !Confirm::new(&prompt).with_default(true).prompt()? {
+        return Ok(None);
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let clone_url = repo_info
+        .clone_url
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("https://github.com/{full_name}.git"));
+    let status = Command::new("git")
+        .arg("clone")
+        .arg(&clone_url)
+        .arg(&target)
+        .status()
+        .context("failed to run git clone")?;
+    if !status.success() {
+        bail!("git clone failed for {full_name}");
+    }
+
+    db::upsert_project(db, &target).await?;
+    db::find_project(db, repo)
+        .await?
+        .with_context(|| format!("cloned {full_name}, but could not index it"))
+        .map(Some)
+}
+
+fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {
+    let home = directories::BaseDirs::new()
+        .context("home dir unavailable")?
+        .home_dir()
+        .to_path_buf();
+    Ok(home.join("Documents").join(owner).join(repo))
 }
 
 fn choose(ps: Vec<Project>) -> Result<Project> {
