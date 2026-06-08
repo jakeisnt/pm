@@ -49,6 +49,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: OrgCmd,
     },
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -63,4 +67,10 @@ pub enum OrgCmd {
     List,
     Hide { name: String },
     Show { name: String },
+}
+
+#[derive(Subcommand)]
+pub enum WorktreeCmd {
+    #[command(alias = "co")]
+    Checkout { branch_name: String },
 }
