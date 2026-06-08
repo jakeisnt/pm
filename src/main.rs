@@ -8,14 +8,10 @@ use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, OrgCmd};
 use inquire::Confirm;
 use project::Project;
+use regex::Regex;
+use skim::{prelude::*, tui::BorderType};
 use sqlx::SqlitePool;
-use std::{
-    collections::BTreeMap,
-    env, fs,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::{collections::BTreeMap, env, fs, io::Cursor, path::PathBuf, process::Command};
 
 #[tokio::main]
 async fn main() {
@@ -157,40 +153,34 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
         bail!("no projects found")
     }
 
-    let mut fzf = Command::new("fzf")
-        .args([
-            "--prompt=Select project> ",
-            "--height=80%",
-            "--layout=reverse",
-            "--border",
-            "--with-nth=1,2",
-            "--delimiter=\t",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .context("failed to launch fzf; install fzf to use interactive project selection")?;
+    let input = ps
+        .iter()
+        .map(|p| format!("{}\t{}\t{}", p.name, p.path, p.id))
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    {
-        let stdin = fzf.stdin.as_mut().context("failed to open fzf stdin")?;
-        for p in &ps {
-            writeln!(stdin, "{}\t{}\t{}", p.name, p.path, p.id)?;
-        }
-    }
-
-    let output = fzf
-        .wait_with_output()
-        .context("failed to read fzf selection")?;
-    if !output.status.success() {
-        bail!("project selection cancelled");
-    }
-
-    let selected = String::from_utf8(output.stdout).context("fzf returned invalid UTF-8")?;
-    let id = selected
-        .trim_end_matches(['\r', '\n'])
+    let options = SkimOptionsBuilder::default()
+        .prompt("Select project> ")
+        .height("80%")
+        .reverse(true)
+        .border(BorderType::Rounded)
+        .with_nth(vec!["1".to_string(), "2".to_string()])
+        .delimiter(Regex::new("\t").context("failed to configure project selector delimiter")?)
+        .build()
+        .context("failed to configure project selector")?;
+    let item_reader = SkimItemReader::new(SkimItemReaderOption::default());
+    let items = item_reader.of_bufread(Cursor::new(input));
+    let output = Skim::run_with(options, Some(items))
+        .map_err(|err| anyhow::anyhow!("failed to run project selector: {err}"))?;
+    let selected = output
+        .selected_items
+        .first()
+        .context("project selection cancelled")?;
+    let selected_output = selected.output();
+    let id = selected_output
         .rsplit('\t')
         .next()
-        .context("fzf returned an invalid selection")?;
+        .context("project selector returned an invalid selection")?;
 
     ps.into_iter()
         .find(|p| p.id == id)
