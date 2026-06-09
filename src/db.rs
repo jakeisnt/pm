@@ -46,6 +46,23 @@ pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
     Ok(())
 }
 
+pub async fn mark_project_remote_only(db: &SqlitePool, id: &str, full_name: &str) -> Result<()> {
+    let Some((owner, repo)) = full_name.split_once('/') else {
+        anyhow::bail!("invalid GitHub repository name: {full_name}");
+    };
+    let t = now();
+    sqlx::query("UPDATE projects SET path=?1,name=?2,last_scanned=?3,last_modified=?3,source='remote',github_full_name=?4,org_name=?5,updated_at=?3,deleted_at=NULL WHERE id=?6")
+        .bind(format!("github://{full_name}"))
+        .bind(repo)
+        .bind(t)
+        .bind(full_name)
+        .bind(owner)
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn scan(db: &SqlitePool) -> Result<()> {
     for root in config::roots() {
         if !root.exists() {

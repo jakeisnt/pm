@@ -12,7 +12,13 @@ use project::Project;
 use regex::Regex;
 use skim::{prelude::*, tui::BorderType};
 use sqlx::SqlitePool;
-use std::{collections::BTreeMap, env, fs, io::Cursor, path::PathBuf, process::Command};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    io::Cursor,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 #[tokio::main]
 async fn main() {
@@ -86,13 +92,36 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
 }
 
 async fn ensure_local_project(db: &SqlitePool, project: Project) -> Result<Project> {
-    let Some(name) = project.path.strip_prefix("github://") else {
-        return Ok(project);
-    };
+    if let Some(name) = project.path.strip_prefix("github://") {
+        return maybe_clone_github_repo(db, name)
+            .await?
+            .with_context(|| format!("{} is not available locally", project.path));
+    }
 
-    maybe_clone_github_repo(db, name)
-        .await?
-        .with_context(|| format!("{} is not available locally", project.path))
+    if Path::new(&project.path).exists() {
+        return Ok(project);
+    }
+
+    if let Some(full_name) = project
+        .github_full_name
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| infer_github_full_name_from_path(&project.path))
+    {
+        db::mark_project_remote_only(db, &project.id, &full_name).await?;
+        return maybe_clone_github_repo(db, &full_name)
+            .await?
+            .with_context(|| format!("{full_name} is not available locally"));
+    }
+
+    Ok(project)
+}
+
+fn infer_github_full_name_from_path(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    let repo = path.file_name()?.to_str()?;
+    let owner = path.parent()?.file_name()?.to_str()?;
+    Some(format!("{owner}/{repo}"))
 }
 
 async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<Project>> {
@@ -103,7 +132,8 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         return Ok(None);
     }
 
-    let repo_info = octocrab::instance()
+    let github = github_client()?;
+    let repo_info = github
         .repos(owner, repo)
         .get()
         .await
@@ -150,6 +180,24 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         .await?
         .with_context(|| format!("cloned {full_name}, but could not index it"))
         .map(Some)
+}
+
+fn github_client() -> Result<octocrab::Octocrab> {
+    let output = Command::new("gh").args(["auth", "token"]).output();
+    if let Ok(output) = output
+        && output.status.success()
+    {
+        let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !token.is_empty() {
+            return octocrab::Octocrab::builder()
+                .personal_token(token)
+                .build()
+                .context("failed to build GitHub client");
+        }
+    }
+    octocrab::Octocrab::builder()
+        .build()
+        .context("failed to build GitHub client")
 }
 
 fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {
