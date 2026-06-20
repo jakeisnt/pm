@@ -49,6 +49,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: OrgCmd,
     },
+    Github {
+        #[command(subcommand)]
+        command: GithubCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -63,4 +67,18 @@ pub enum OrgCmd {
     List,
     Hide { name: String },
     Show { name: String },
+}
+
+#[derive(Subcommand)]
+pub enum GithubCmd {
+    /// Authenticate with GitHub using the OAuth device flow.
+    Login {
+        /// GitHub OAuth app client id. Falls back to PM_GITHUB_CLIENT_ID.
+        #[arg(long)]
+        client_id: Option<String>,
+    },
+    /// Show the saved GitHub authentication status.
+    Status,
+    /// Remove saved GitHub credentials.
+    Logout,
 }

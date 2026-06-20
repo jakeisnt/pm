@@ -43,6 +43,11 @@ p org list
 p org hide <org>
 p org show <org>
 
+# Authenticate GitHub access for remote repository lookup/clone
+PM_GITHUB_CLIENT_ID=<oauth-client-id> p github login
+p github status
+p github logout
+
 # Manage config.json
 p config list
 p config set searchDepth 3
@@ -56,7 +61,7 @@ p config delete searchDepth
 - `searchRoots`: array of directories to scan for Git repositories
 - `searchDepth`: recursion depth for project discovery
 
-Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`).
+Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
 
 ## License
 

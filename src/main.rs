@@ -1,11 +1,12 @@
 mod cli;
 mod config;
 mod db;
+mod github_auth;
 mod project;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, OrgCmd};
+use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd};
 use colored::{Color, Colorize};
 use inquire::Confirm;
 use project::Project;
@@ -53,6 +54,7 @@ async fn run() -> Result<()> {
         Some(Commands::Dev) => dev_cmd()?,
         Some(Commands::Config { command }) => config_cmd(command)?,
         Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
+        Some(Commands::Github { command }) => github_cmd(command).await?,
         None => select_cmd(&pool, cli).await?,
     }
     Ok(())
@@ -132,7 +134,8 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         return Ok(None);
     }
 
-    let github = github_client()?;
+    let github = github_auth::client()?;
+    let token = github_auth::load_token()?;
     let repo_info = github
         .repos(owner, repo)
         .get()
@@ -165,8 +168,18 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         .as_ref()
         .map(ToString::to_string)
         .unwrap_or_else(|| format!("https://github.com/{full_name}.git"));
-    let status = Command::new("git")
-        .arg("clone")
+    let mut clone = Command::new("git");
+    clone.arg("clone");
+    if let Some(token) = token.as_deref() {
+        clone
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
+            .env(
+                "GIT_CONFIG_VALUE_0",
+                format!("Authorization: Bearer {token}"),
+            );
+    }
+    let status = clone
         .arg(&clone_url)
         .arg(&target)
         .status()
@@ -180,24 +193,6 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         .await?
         .with_context(|| format!("cloned {full_name}, but could not index it"))
         .map(Some)
-}
-
-fn github_client() -> Result<octocrab::Octocrab> {
-    let output = Command::new("gh").args(["auth", "token"]).output();
-    if let Ok(output) = output
-        && output.status.success()
-    {
-        let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !token.is_empty() {
-            return octocrab::Octocrab::builder()
-                .personal_token(token)
-                .build()
-                .context("failed to build GitHub client");
-        }
-    }
-    octocrab::Octocrab::builder()
-        .build()
-        .context("failed to build GitHub client")
 }
 
 fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {
@@ -382,6 +377,15 @@ async fn org_cmd(db: &SqlitePool, cmd: OrgCmd) -> Result<()> {
         }
         OrgCmd::Hide { name } => db::set_org_hidden(db, name, true).await?,
         OrgCmd::Show { name } => db::set_org_hidden(db, name, false).await?,
+    }
+    Ok(())
+}
+
+async fn github_cmd(cmd: GithubCmd) -> Result<()> {
+    match cmd {
+        GithubCmd::Login { client_id } => github_auth::login(client_id).await?,
+        GithubCmd::Status => github_auth::status().await?,
+        GithubCmd::Logout => github_auth::logout()?,
     }
     Ok(())
 }
