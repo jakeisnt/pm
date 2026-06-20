@@ -27,6 +27,13 @@ cargo fmt --check
 # Interactive project switcher
 p
 
+# Jump directly to a project; if no match is found, opens the selector with this query prefilled
+p pm
+
+# Open pi in the selected project
+p --agent pm
+p -a
+
 # Resolve a project path
 p resolve pm
 

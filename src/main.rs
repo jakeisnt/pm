@@ -70,12 +70,26 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
     let p = if let Some(n) = cli.name {
         match db::find_project(db, &n).await? {
             Some(p) => ensure_local_project(db, p).await?,
-            None => maybe_clone_github_repo(db, &n)
-                .await?
-                .context("no matching project")?,
+            None => match maybe_clone_github_repo(db, &n).await? {
+                Some(p) => p,
+                None => {
+                    eprintln!(
+                        "{} no project found for {}",
+                        "warning:".yellow().bold(),
+                        n.bold()
+                    );
+                    let Some(p) = choose(ps, Some(&n))? else {
+                        return Ok(());
+                    };
+                    ensure_local_project(db, p).await?
+                }
+            },
         }
     } else {
-        ensure_local_project(db, choose(ps)?).await?
+        let Some(p) = choose(ps, None)? else {
+            return Ok(());
+        };
+        ensure_local_project(db, p).await?
     };
     db::touch(db, &p).await?;
 
@@ -83,6 +97,8 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
         if cli.path {
             print!("{}", p.path);
         }
+    } else if cli.agent {
+        spawn_agent_in(&p.path)?;
     } else if let Some(cmd) = cli.open {
         Command::new(cmd).arg(&p.path).status()?;
     } else if let Some(app) = cli.app {
@@ -215,7 +231,7 @@ fn style_path(path: &str) -> colored::ColoredString {
     path.dimmed()
 }
 
-fn choose(ps: Vec<Project>) -> Result<Project> {
+fn choose(ps: Vec<Project>, initial_query: Option<&str>) -> Result<Option<Project>> {
     if ps.is_empty() {
         bail!("no projects found")
     }
@@ -226,23 +242,30 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
         .collect::<Vec<_>>()
         .join("\n");
 
-    let options = SkimOptionsBuilder::default()
+    let mut options_builder = SkimOptionsBuilder::default();
+    options_builder
         .prompt(format!("{} ", "Select project>".bright_cyan().bold()))
         .height("80%")
         .reverse(true)
         .border(BorderType::Rounded)
         .with_nth(vec!["1".to_string(), "2".to_string()])
-        .delimiter(Regex::new("\t").context("failed to configure project selector delimiter")?)
+        .delimiter(Regex::new("\t").context("failed to configure project selector delimiter")?);
+    if let Some(query) = initial_query {
+        options_builder.query(query.to_string());
+    }
+    let options = options_builder
         .build()
         .context("failed to configure project selector")?;
     let item_reader = SkimItemReader::new(SkimItemReaderOption::default().ansi(true));
     let items = item_reader.of_bufread(Cursor::new(input));
     let output = Skim::run_with(options, Some(items))
         .map_err(|err| anyhow::anyhow!("failed to run project selector: {err}"))?;
-    let selected = output
-        .selected_items
-        .first()
-        .context("project selection cancelled")?;
+    if output.is_abort {
+        return Ok(None);
+    }
+    let Some(selected) = output.selected_items.first() else {
+        return Ok(None);
+    };
     let selected_output = selected.output();
     let id = selected_output
         .rsplit('\t')
@@ -252,6 +275,15 @@ fn choose(ps: Vec<Project>) -> Result<Project> {
     ps.into_iter()
         .find(|p| p.id == id)
         .context("selected project no longer exists")
+        .map(Some)
+}
+
+fn spawn_agent_in(path: &str) -> Result<()> {
+    Command::new("pi")
+        .current_dir(path)
+        .status()
+        .context("failed to launch pi")?;
+    Ok(())
 }
 
 fn spawn_shell_in(path: &str) -> Result<()> {

@@ -18,6 +18,7 @@ Rust is pinned in `rust-toolchain.toml`; do not change the toolchain casually.
 
 - `src/main.rs` — CLI entry point and implementation
 - `migrations/` — historical SQLite schema files for compatibility/reference
+- `web/` — standalone static promo site for Cloudflare Pages; keep it build-free unless requested
 - `config.json` — local/default configuration
 
 ## Conventions

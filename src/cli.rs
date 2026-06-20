@@ -12,8 +12,10 @@ pub struct Cli {
     pub path: bool,
     #[arg(short, long)]
     pub open: Option<String>,
-    #[arg(short = 'a', long)]
+    #[arg(long)]
     pub app: Option<String>,
+    #[arg(short = 'a', long)]
+    pub agent: bool,
     #[arg(short, long)]
     pub silent: bool,
     #[arg(long)]
