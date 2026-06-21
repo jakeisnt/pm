@@ -55,6 +55,15 @@ PM_GITHUB_CLIENT_ID=<oauth-client-id> p github login
 p github status
 p github logout
 
+# Install a shell hook that indexes git repositories as you cd into them or run git init
+p hook zsh >> ~/.zshrc
+# bash and fish are also supported
+p hook bash
+p hook fish
+
+# Index the current git repository manually
+p index
+
 # Manage config.json
 p config list
 p config set searchDepth 3
@@ -69,6 +78,8 @@ p config delete searchDepth
 - `searchDepth`: recursion depth for project discovery
 
 Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
+
+`p hook zsh` prints a hook for `.zshrc` that watches prompt/directory changes, detects when `$PWD` is inside a git worktree, and runs `p index --quiet <repo-root>` in the background. `p index` records the local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too.
 
 ## License
 

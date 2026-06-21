@@ -6,7 +6,7 @@ mod project;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd};
+use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd, Shell};
 use colored::{Color, Colorize};
 use inquire::Confirm;
 use project::Project;
@@ -55,6 +55,8 @@ async fn run() -> Result<()> {
         Some(Commands::Config { command }) => config_cmd(command)?,
         Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
         Some(Commands::Github { command }) => github_cmd(command).await?,
+        Some(Commands::Hook { shell }) => hook_cmd(shell),
+        Some(Commands::Index { path, quiet }) => index_cmd(&pool, path, quiet).await?,
         None => select_cmd(&pool, cli).await?,
     }
     Ok(())
@@ -420,4 +422,82 @@ async fn github_cmd(cmd: GithubCmd) -> Result<()> {
         GithubCmd::Logout => github_auth::logout()?,
     }
     Ok(())
+}
+
+async fn index_cmd(db: &SqlitePool, path: Option<String>, quiet: bool) -> Result<()> {
+    let path = path.map(PathBuf::from).unwrap_or(env::current_dir()?);
+    let Some(root) = db::git_repo_root(&path)? else {
+        if !quiet {
+            eprintln!("{} not inside a git repository", "warning:".yellow().bold());
+        }
+        return Ok(());
+    };
+    db::upsert_project(db, &root).await?;
+    if !quiet {
+        println!("{} {}", "indexed".green().bold(), root.display());
+    }
+    Ok(())
+}
+
+const ZSH_HOOK: &str = r#"# p: index git repositories as you enter or create them.
+typeset -g _P_LAST_INDEXED_ROOT="${_P_LAST_INDEXED_ROOT:-}"
+_p_index_git_repo() {
+  emulate -L zsh
+  command -v p >/dev/null 2>&1 || return
+  local root
+  root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || return
+  [[ -n "$root" ]] || return
+  local remote key
+  remote=$(git -C "$root" remote get-url origin 2>/dev/null || true)
+  key="$root|$remote"
+  [[ "$key" == "$_P_LAST_INDEXED_ROOT" ]] && return
+  _P_LAST_INDEXED_ROOT="$key"
+  p index --quiet "$root" >/dev/null 2>&1 &!
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _p_index_git_repo
+add-zsh-hook precmd _p_index_git_repo
+_p_index_git_repo
+"#;
+
+const BASH_HOOK: &str = r#"# p: index git repositories as you enter or create them.
+__p_prompt_command="${PROMPT_COMMAND:-}"
+__p_last_indexed_root="${__p_last_indexed_root:-}"
+__p_index_git_repo() {
+  command -v p >/dev/null 2>&1 || return
+  local root
+  root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || return
+  [ -n "$root" ] || return
+  local remote key
+  remote=$(git -C "$root" remote get-url origin 2>/dev/null || true)
+  key="$root|$remote"
+  [ "$key" = "$__p_last_indexed_root" ] && return
+  __p_last_indexed_root="$key"
+  p index --quiet "$root" >/dev/null 2>&1 &
+}
+PROMPT_COMMAND="__p_index_git_repo${__p_prompt_command:+; $__p_prompt_command}"
+__p_index_git_repo
+"#;
+
+const FISH_HOOK: &str = r#"# p: index git repositories as you enter or create them.
+set -g __p_last_indexed_root $__p_last_indexed_root
+function __p_index_git_repo --on-variable PWD --on-event fish_prompt
+  command -q p; or return
+  set -l root (git -C "$PWD" rev-parse --show-toplevel 2>/dev/null); or return
+  test -n "$root"; or return
+  set -l remote (git -C "$root" remote get-url origin 2>/dev/null)
+  set -l key "$root|$remote"
+  test "$key" = "$__p_last_indexed_root"; and return
+  set -g __p_last_indexed_root "$key"
+  p index --quiet "$root" >/dev/null 2>&1 &
+end
+__p_index_git_repo
+"#;
+
+fn hook_cmd(shell: Shell) {
+    match shell {
+        Shell::Zsh => print!("{ZSH_HOOK}"),
+        Shell::Bash => print!("{BASH_HOOK}"),
+        Shell::Fish => print!("{FISH_HOOK}"),
+    }
 }

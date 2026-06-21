@@ -2,7 +2,11 @@ use crate::{config, project::Project};
 use anyhow::{Context, Result};
 use directories::BaseDirs;
 use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -34,16 +38,83 @@ fn now() -> i64 {
 }
 
 pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
+    let path = git_repo_root(path)?.unwrap_or_else(|| path.to_path_buf());
     let name = path.file_name().unwrap().to_string_lossy();
+    let remote = github_full_name(&path);
+    let owner = remote.as_deref().and_then(|full_name| {
+        full_name
+            .split_once('/')
+            .map(|(owner, _)| owner.to_string())
+    });
     let t = now();
-    sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,scope,org_name) VALUES(?1,?2,?3,?4,?4,1,?4,?4,'local','personal','_local') ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,source='local',updated_at=excluded.updated_at,deleted_at=NULL")
+    sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name) VALUES(?1,?2,?3,?4,?4,1,?4,?4,'local',?5,'personal',COALESCE(?6,'_local')) ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,source='local',github_full_name=COALESCE(excluded.github_full_name,projects.github_full_name),org_name=COALESCE(?6,projects.org_name),updated_at=excluded.updated_at,deleted_at=NULL")
         .bind(Uuid::new_v4().to_string())
         .bind(path.to_string_lossy().to_string())
         .bind(name.as_ref())
         .bind(t)
+        .bind(remote)
+        .bind(owner)
         .execute(db)
         .await?;
     Ok(())
+}
+
+pub fn git_repo_root(path: &Path) -> Result<Option<PathBuf>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--show-toplevel"])
+        .output();
+    let Ok(output) = output else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let root =
+        String::from_utf8(output.stdout).context("git returned a non-UTF-8 repository path")?;
+    let root = root.trim();
+    if root.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(PathBuf::from(root)))
+    }
+}
+
+fn github_full_name(path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8(output.stdout).ok()?;
+    parse_github_remote(url.trim())
+}
+
+fn parse_github_remote(url: &str) -> Option<String> {
+    let path = if let Some(rest) = url.strip_prefix("git@github.com:") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("https://github.com/") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("http://github.com/") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("ssh://git@github.com/") {
+        rest
+    } else {
+        return None;
+    };
+    let path = path.split(['?', '#']).next()?.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, repo) = path.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        None
+    } else {
+        Some(format!("{owner}/{repo}"))
+    }
 }
 
 pub async fn mark_project_remote_only(db: &SqlitePool, id: &str, full_name: &str) -> Result<()> {

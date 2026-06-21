@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -55,6 +55,24 @@ pub enum Commands {
         #[command(subcommand)]
         command: GithubCmd,
     },
+    /// Print a shell hook that indexes git repositories as you enter/create them.
+    Hook {
+        #[arg(value_enum, default_value_t = Shell::Zsh)]
+        shell: Shell,
+    },
+    /// Index a git repository path. Intended for shell hooks.
+    Index {
+        path: Option<String>,
+        #[arg(short, long)]
+        quiet: bool,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+pub enum Shell {
+    Zsh,
+    Bash,
+    Fish,
 }
 
 #[derive(Subcommand)]
