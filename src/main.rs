@@ -31,6 +31,15 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(Commands::Hook { shell }) = &cli.command {
+        hook_cmd(*shell);
+        return Ok(());
+    }
+    if let Some(Commands::HookInstall { shell }) = &cli.command {
+        install_hook_cmd(*shell)?;
+        return Ok(());
+    }
+
     let pool = db::connect().await?;
     db::migrate(&pool).await?;
 
@@ -56,6 +65,7 @@ async fn run() -> Result<()> {
         Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
         Some(Commands::Github { command }) => github_cmd(command).await?,
         Some(Commands::Hook { shell }) => hook_cmd(shell),
+        Some(Commands::HookInstall { shell }) => install_hook_cmd(shell)?,
         Some(Commands::Index { path, quiet }) => index_cmd(&pool, path, quiet).await?,
         None => select_cmd(&pool, cli).await?,
     }
@@ -494,10 +504,100 @@ end
 __p_index_git_repo
 "#;
 
-fn hook_cmd(shell: Shell) {
+fn hook_text(shell: Shell) -> &'static str {
     match shell {
-        Shell::Zsh => print!("{ZSH_HOOK}"),
-        Shell::Bash => print!("{BASH_HOOK}"),
-        Shell::Fish => print!("{FISH_HOOK}"),
+        Shell::Zsh => ZSH_HOOK,
+        Shell::Bash => BASH_HOOK,
+        Shell::Fish => FISH_HOOK,
+    }
+}
+
+fn hook_cmd(shell: Shell) {
+    print!("{}", hook_text(shell));
+}
+
+fn install_hook_cmd(shell: Option<Shell>) -> Result<()> {
+    let shell = shell.unwrap_or_else(detect_shell);
+    let path = hook_install_path(shell)?;
+    let hook = format!(
+        "# >>> p hook >>>\n{}\n# <<< p hook <<<\n",
+        hook_text(shell).trim_end_matches('\n')
+    );
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let updated = replace_or_append_hook(&existing, &hook);
+    fs::write(&path, updated)?;
+    println!(
+        "{} installed {} hook in {}",
+        "ok:".green().bold(),
+        shell_name(shell).bold(),
+        path.display().to_string().dimmed()
+    );
+    Ok(())
+}
+
+fn detect_shell() -> Shell {
+    let shell = env::var("SHELL").unwrap_or_default();
+    let shell_name = Path::new(&shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    match shell_name {
+        "bash" => Shell::Bash,
+        "fish" => Shell::Fish,
+        _ => Shell::Zsh,
+    }
+}
+
+fn hook_install_path(shell: Shell) -> Result<PathBuf> {
+    let home = directories::BaseDirs::new()
+        .context("home dir unavailable")?
+        .home_dir()
+        .to_path_buf();
+    Ok(match shell {
+        Shell::Zsh => home.join(".zshrc"),
+        Shell::Bash => home.join(".bashrc"),
+        Shell::Fish => home
+            .join(".config")
+            .join("fish")
+            .join("conf.d")
+            .join("p.fish"),
+    })
+}
+
+fn replace_or_append_hook(existing: &str, hook: &str) -> String {
+    let start = "# >>> p hook >>>";
+    let end = "# <<< p hook <<<";
+    if let Some(start_idx) = existing.find(start)
+        && let Some(relative_end_idx) = existing[start_idx..].find(end)
+    {
+        let end_idx = start_idx + relative_end_idx + end.len();
+        let mut updated = String::new();
+        updated.push_str(&existing[..start_idx]);
+        updated.push_str(hook);
+        updated.push_str(existing[end_idx..].trim_start_matches('\n'));
+        return updated;
+    }
+
+    let mut updated = existing.to_string();
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    if !updated.is_empty() {
+        updated.push('\n');
+    }
+    updated.push_str(hook);
+    updated
+}
+
+fn shell_name(shell: Shell) -> &'static str {
+    match shell {
+        Shell::Zsh => "zsh",
+        Shell::Bash => "bash",
+        Shell::Fish => "fish",
     }
 }

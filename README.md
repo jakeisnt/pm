@@ -56,10 +56,14 @@ p github status
 p github logout
 
 # Install a shell hook that indexes git repositories as you cd into them or run git init
-p hook zsh >> ~/.zshrc
-# bash and fish are also supported
-p hook bash
-p hook fish
+p hook-install
+# Or choose a shell explicitly
+p hook-install zsh
+p hook-install bash
+p hook-install fish
+
+# Print the hook without installing it
+p hook zsh
 
 # Index the current git repository manually
 p index
@@ -79,7 +83,7 @@ p config delete searchDepth
 
 Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
 
-`p hook zsh` prints a hook for `.zshrc` that watches prompt/directory changes, detects when `$PWD` is inside a git worktree, and runs `p index --quiet <repo-root>` in the background. `p index` records the local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too.
+`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook watches prompt/directory changes, detects when `$PWD` is inside a git worktree, and runs `p index --quiet <repo-root>` in the background. `p index` records the local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too.
 
 ## License
 

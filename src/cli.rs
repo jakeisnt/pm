@@ -60,6 +60,11 @@ pub enum Commands {
         #[arg(value_enum, default_value_t = Shell::Zsh)]
         shell: Shell,
     },
+    /// Install or update the shell hook in your shell startup file.
+    HookInstall {
+        #[arg(value_enum)]
+        shell: Option<Shell>,
+    },
     /// Index a git repository path. Intended for shell hooks.
     Index {
         path: Option<String>,
