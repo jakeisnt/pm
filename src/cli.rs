@@ -55,7 +55,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: GithubCmd,
     },
-    /// Print a shell hook that indexes git repositories as you enter/create them.
+    /// Print a shell hook that indexes git repositories after git creates them.
     Hook {
         #[arg(value_enum, default_value_t = Shell::Zsh)]
         shell: Shell,

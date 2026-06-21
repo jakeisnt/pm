@@ -55,7 +55,7 @@ PM_GITHUB_CLIENT_ID=<oauth-client-id> p github login
 p github status
 p github logout
 
-# Install a shell hook that indexes git repositories as you cd into them or run git init
+# Install a shell hook that indexes repositories after git init/clone/worktree add
 p hook-install
 # Or choose a shell explicitly
 p hook-install zsh
@@ -83,7 +83,7 @@ p config delete searchDepth
 
 Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
 
-`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook watches prompt/directory changes, detects when `$PWD` is inside a git worktree, and runs `p index --quiet <repo-root>` in the background. `p index` records the local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too.
+`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. `p index` records the local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too.
 
 ## License
 

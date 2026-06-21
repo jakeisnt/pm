@@ -449,59 +449,219 @@ async fn index_cmd(db: &SqlitePool, path: Option<String>, quiet: bool) -> Result
     Ok(())
 }
 
-const ZSH_HOOK: &str = r#"# p: index git repositories as you enter or create them.
-typeset -g _P_LAST_INDEXED_ROOT="${_P_LAST_INDEXED_ROOT:-}"
-_p_index_git_repo() {
+const ZSH_HOOK: &str = r#"# p: index git repositories after git creates them.
+_p_index_git_repo_at() {
   emulate -L zsh
   command -v p >/dev/null 2>&1 || return
-  local root
-  root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || return
-  [[ -n "$root" ]] || return
-  local remote key
-  remote=$(git -C "$root" remote get-url origin 2>/dev/null || true)
-  key="$root|$remote"
-  [[ "$key" == "$_P_LAST_INDEXED_ROOT" ]] && return
-  _P_LAST_INDEXED_ROOT="$key"
-  p index --quiet "$root" >/dev/null 2>&1 &!
+  [[ -n "$1" ]] || return
+  p index --quiet "$1" >/dev/null 2>&1 &!
 }
-autoload -Uz add-zsh-hook
-add-zsh-hook chpwd _p_index_git_repo
-add-zsh-hook precmd _p_index_git_repo
-_p_index_git_repo
+_p_git_non_option_args() {
+  emulate -L zsh
+  local -a positional
+  local arg skip_next=0 after_options=0
+  for arg in "$@"; do
+    if (( skip_next )); then
+      skip_next=0
+      continue
+    fi
+    if (( after_options )); then
+      positional+=("$arg")
+      continue
+    fi
+    case "$arg" in
+      --) after_options=1 ;;
+      -b|--branch|-o|--origin|--depth|--config|-c|--jobs|-j|--server-option|--reference|--reference-if-able|--separate-git-dir|--template|-u|--upload-pack) skip_next=1 ;;
+      -*) ;;
+      *) positional+=("$arg") ;;
+    esac
+  done
+  (( ${#positional} )) && printf '%s\n' "${positional[@]}"
+}
+_p_git_clone_dest() {
+  emulate -L zsh
+  local -a positional
+  positional=(${(f)"$(_p_git_non_option_args "$@")"})
+  (( ${#positional} )) || return
+  if (( ${#positional} >= 2 )); then
+    print -r -- "$positional[2]"
+  else
+    local repo="$positional[1]" dest
+    dest="${repo:t}"
+    print -r -- "${dest%.git}"
+  fi
+}
+git() {
+  command git "$@"
+  local git_status=$?
+  (( git_status == 0 )) || return $git_status
+  case "$1" in
+    init)
+      local -a positional
+      positional=(${(f)"$(_p_git_non_option_args "${@:2}")"})
+      if (( ${#positional} )); then
+        _p_index_git_repo_at "$positional[-1]"
+      else
+        _p_index_git_repo_at "$PWD"
+      fi
+      ;;
+    clone)
+      local dest
+      dest="$(_p_git_clone_dest "${@:2}")"
+      [[ -n "$dest" ]] && _p_index_git_repo_at "$dest"
+      ;;
+    worktree)
+      if [[ "$2" == "add" ]]; then
+        local -a positional
+        positional=(${(f)"$(_p_git_non_option_args "${@:3}")"})
+        (( ${#positional} )) && _p_index_git_repo_at "$positional[1]"
+      fi
+      ;;
+  esac
+  return $git_status
+}
 "#;
 
-const BASH_HOOK: &str = r#"# p: index git repositories as you enter or create them.
-__p_prompt_command="${PROMPT_COMMAND:-}"
-__p_last_indexed_root="${__p_last_indexed_root:-}"
-__p_index_git_repo() {
+const BASH_HOOK: &str = r#"# p: index git repositories after git creates them.
+__p_index_git_repo_at() {
   command -v p >/dev/null 2>&1 || return
-  local root
-  root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null) || return
-  [ -n "$root" ] || return
-  local remote key
-  remote=$(git -C "$root" remote get-url origin 2>/dev/null || true)
-  key="$root|$remote"
-  [ "$key" = "$__p_last_indexed_root" ] && return
-  __p_last_indexed_root="$key"
-  p index --quiet "$root" >/dev/null 2>&1 &
+  [ -n "$1" ] || return
+  p index --quiet "$1" >/dev/null 2>&1 &
 }
-PROMPT_COMMAND="__p_index_git_repo${__p_prompt_command:+; $__p_prompt_command}"
-__p_index_git_repo
+__p_git_non_option_args() {
+  local positional=() arg skip_next=0 after_options=0
+  for arg in "$@"; do
+    if [ "$skip_next" -eq 1 ]; then
+      skip_next=0
+      continue
+    fi
+    if [ "$after_options" -eq 1 ]; then
+      positional+=("$arg")
+      continue
+    fi
+    case "$arg" in
+      --) after_options=1 ;;
+      -b|--branch|-o|--origin|--depth|--config|-c|--jobs|-j|--server-option|--reference|--reference-if-able|--separate-git-dir|--template|-u|--upload-pack) skip_next=1 ;;
+      -*) ;;
+      *) positional+=("$arg") ;;
+    esac
+  done
+  [ "${#positional[@]}" -gt 0 ] && printf '%s\n' "${positional[@]}"
+}
+__p_git_clone_dest() {
+  local positional=() repo dest
+  while IFS= read -r line; do
+    positional+=("$line")
+  done < <(__p_git_non_option_args "$@")
+  [ "${#positional[@]}" -gt 0 ] || return
+  if [ "${#positional[@]}" -ge 2 ]; then
+    printf '%s\n' "${positional[1]}"
+  else
+    repo="${positional[0]}"
+    dest="${repo##*/}"
+    printf '%s\n' "${dest%.git}"
+  fi
+}
+git() {
+  command git "$@"
+  local status=$?
+  [ "$status" -eq 0 ] || return "$status"
+  case "$1" in
+    init)
+      local positional=()
+      while IFS= read -r line; do
+        positional+=("$line")
+      done < <(__p_git_non_option_args "${@:2}")
+      if [ "${#positional[@]}" -gt 0 ]; then
+        __p_index_git_repo_at "${positional[$((${#positional[@]} - 1))]}"
+      else
+        __p_index_git_repo_at "$PWD"
+      fi
+      ;;
+    clone)
+      local dest
+      dest="$(__p_git_clone_dest "${@:2}")"
+      [ -n "$dest" ] && __p_index_git_repo_at "$dest"
+      ;;
+    worktree)
+      if [ "$2" = "add" ]; then
+        local positional=()
+        while IFS= read -r line; do
+          positional+=("$line")
+        done < <(__p_git_non_option_args "${@:3}")
+        [ "${#positional[@]}" -gt 0 ] && __p_index_git_repo_at "${positional[0]}"
+      fi
+      ;;
+  esac
+  return "$status"
+}
 "#;
 
-const FISH_HOOK: &str = r#"# p: index git repositories as you enter or create them.
-set -g __p_last_indexed_root $__p_last_indexed_root
-function __p_index_git_repo --on-variable PWD --on-event fish_prompt
+const FISH_HOOK: &str = r#"# p: index git repositories after git creates them.
+function __p_index_git_repo_at
   command -q p; or return
-  set -l root (git -C "$PWD" rev-parse --show-toplevel 2>/dev/null); or return
-  test -n "$root"; or return
-  set -l remote (git -C "$root" remote get-url origin 2>/dev/null)
-  set -l key "$root|$remote"
-  test "$key" = "$__p_last_indexed_root"; and return
-  set -g __p_last_indexed_root "$key"
-  p index --quiet "$root" >/dev/null 2>&1 &
+  test -n "$argv[1]"; or return
+  p index --quiet "$argv[1]" >/dev/null 2>&1 &
 end
-__p_index_git_repo
+function __p_git_non_option_args
+  set -l positional
+  set -l skip_next 0
+  set -l after_options 0
+  for arg in $argv
+    if test $skip_next -eq 1
+      set skip_next 0
+      continue
+    end
+    if test $after_options -eq 1
+      set -a positional "$arg"
+      continue
+    end
+    switch "$arg"
+      case --
+        set after_options 1
+      case -b --branch -o --origin --depth --config -c --jobs -j --server-option --reference --reference-if-able --separate-git-dir --template -u --upload-pack
+        set skip_next 1
+      case '-*'
+      case '*'
+        set -a positional "$arg"
+    end
+  end
+  test (count $positional) -gt 0; and printf '%s\n' $positional
+end
+function __p_git_clone_dest
+  set -l positional (__p_git_non_option_args $argv)
+  test (count $positional) -gt 0; or return
+  if test (count $positional) -ge 2
+    printf '%s\n' $positional[2]
+  else
+    set -l repo $positional[1]
+    set -l dest (basename "$repo")
+    string replace -r '\.git$' '' -- "$dest"
+  end
+end
+function git
+  command git $argv
+  set -l git_status $status
+  test $git_status -eq 0; or return $git_status
+  switch "$argv[1]"
+    case init
+      set -l positional (__p_git_non_option_args $argv[2..-1])
+      if test (count $positional) -gt 0
+        __p_index_git_repo_at $positional[-1]
+      else
+        __p_index_git_repo_at "$PWD"
+      end
+    case clone
+      set -l dest (__p_git_clone_dest $argv[2..-1])
+      test -n "$dest"; and __p_index_git_repo_at "$dest"
+    case worktree
+      if test "$argv[2]" = add
+        set -l positional (__p_git_non_option_args $argv[3..-1])
+        test (count $positional) -gt 0; and __p_index_git_repo_at $positional[1]
+      end
+  end
+  return $git_status
+end
 "#;
 
 fn hook_text(shell: Shell) -> &'static str {
