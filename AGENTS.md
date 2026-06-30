@@ -1,6 +1,6 @@
 # pm — Project Manager
 
-A Rust CLI tool. `p` is the binary. Manages project switching, per-project knowledge, and project discovery. This repository is public — work on feature branches and do not push secrets.
+A Rust CLI tool. `p` is the binary. Manages project switching, per-project knowledge, and project discovery. This repository is public — never create new branches, always work on and push directly to `main`, and do not push secrets.
 
 ## Quick Start
 
