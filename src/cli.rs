@@ -33,10 +33,10 @@ pub enum Commands {
     Create {
         /// Repository name, or owner/name for an org/user repository.
         name: String,
-        /// Create a public repository. Repositories are private by default.
+        /// Refused: public repositories must be created manually outside p.
         #[arg(long, conflicts_with = "private")]
         public: bool,
-        /// Create a private repository. This is the default.
+        /// Create a private repository. This is always the default.
         #[arg(long)]
         private: bool,
         /// Optional GitHub repository description.
@@ -79,8 +79,9 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Option<Shell>,
     },
-    /// Index a git repository path. Intended for shell hooks.
+    /// Force reindexing of local roots and GitHub remotes, or index one git repository path.
     Index {
+        /// Optional repository path to index; when omitted, all configured local roots and GitHub remotes are indexed.
         path: Option<String>,
         #[arg(short, long)]
         quiet: bool,

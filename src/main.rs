@@ -167,12 +167,23 @@ struct GitHubRepoResponse {
     clone_url: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRepoListItem {
+    full_name: String,
+}
+
 async fn create_cmd(
     db: &SqlitePool,
     name: &str,
     public: bool,
     description: Option<String>,
 ) -> Result<()> {
+    if public {
+        bail!(
+            "creating public repositories with p is disabled; create public repositories manually"
+        );
+    }
+
     let token = github_auth::load_token()?
         .context("GitHub authentication required; run `p github login` or `gh auth login` first")?;
     let login = github_auth::validate_token(Some(&token))
@@ -549,18 +560,80 @@ async fn github_cmd(cmd: GithubCmd) -> Result<()> {
 }
 
 async fn index_cmd(db: &SqlitePool, path: Option<String>, quiet: bool) -> Result<()> {
-    let path = path.map(PathBuf::from).unwrap_or(env::current_dir()?);
-    let Some(root) = db::git_repo_root(&path)? else {
+    if let Some(path) = path {
+        let path = PathBuf::from(path);
+        let Some(root) = db::git_repo_root(&path)? else {
+            if !quiet {
+                eprintln!("{} not inside a git repository", "warning:".yellow().bold());
+            }
+            return Ok(());
+        };
+        db::upsert_project(db, &root).await?;
         if !quiet {
-            eprintln!("{} not inside a git repository", "warning:".yellow().bold());
+            println!("{} {}", "indexed".green().bold(), root.display());
         }
         return Ok(());
-    };
-    db::upsert_project(db, &root).await?;
+    }
+
+    let local = db::scan(db).await?;
+    let remote = index_remote_repos(db, quiet).await?;
     if !quiet {
-        println!("{} {}", "indexed".green().bold(), root.display());
+        println!(
+            "{} {} local, {} remote",
+            "indexed".green().bold(),
+            local,
+            remote
+        );
     }
     Ok(())
+}
+
+async fn index_remote_repos(db: &SqlitePool, quiet: bool) -> Result<usize> {
+    let Some(token) = github_auth::load_token()? else {
+        if !quiet {
+            eprintln!(
+                "{} remote indexing skipped; authenticate with {} first",
+                "warning:".yellow().bold(),
+                "p github login".bold()
+            );
+        }
+        return Ok(0);
+    };
+
+    let http = reqwest::Client::new();
+    let mut indexed = 0;
+    let mut page = 1;
+    loop {
+        let repos = http
+            .get("https://api.github.com/user/repos")
+            .query(&[
+                ("affiliation", "owner,collaborator,organization_member"),
+                ("per_page", "100"),
+                ("page", &page.to_string()),
+            ])
+            .header(reqwest::header::USER_AGENT, "pm")
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .bearer_auth(&token)
+            .send()
+            .await
+            .context("failed to list GitHub repositories")?
+            .error_for_status()
+            .context("failed to list GitHub repositories")?
+            .json::<Vec<GitHubRepoListItem>>()
+            .await
+            .context("failed to parse GitHub repository list")?;
+        let count = repos.len();
+        for repo in repos {
+            db::upsert_remote_project(db, &repo.full_name).await?;
+            indexed += 1;
+        }
+        if count < 100 {
+            break;
+        }
+        page += 1;
+    }
+    Ok(indexed)
 }
 
 const ZSH_HOOK: &str = r#"# p: index git repositories after git creates them.
