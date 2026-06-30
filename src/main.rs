@@ -164,11 +164,14 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
 
     let github = github_auth::client()?;
     let token = github_auth::load_token()?;
-    let repo_info = github
-        .repos(owner, repo)
-        .get()
-        .await
-        .with_context(|| format!("GitHub repository not found: {owner}/{repo}"))?;
+    let repo_info = github.repos(owner, repo).get().await.with_context(|| {
+        let auth_hint = if token.is_some() {
+            "check that your token has private-repository access and org SSO authorization"
+        } else {
+            "authenticate with `p github login` or `gh auth login` to access private repositories"
+        };
+        format!("GitHub repository not found or inaccessible: {owner}/{repo}; {auth_hint}")
+    })?;
     let full_name = repo_info
         .full_name
         .clone()

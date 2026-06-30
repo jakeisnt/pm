@@ -2,7 +2,12 @@ use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use directories::BaseDirs;
 use serde::Deserialize;
-use std::{fs, path::PathBuf, process::Command, time::Duration};
+use std::{
+    fs,
+    path::PathBuf,
+    process::{Command, Stdio},
+    time::Duration,
+};
 use tokio::time::sleep;
 
 const DEFAULT_SCOPES: &str = "repo read:org";
@@ -37,12 +42,79 @@ pub fn token_path() -> Result<PathBuf> {
     Ok(dir.join("github-token"))
 }
 
+#[derive(Debug)]
+pub struct Token {
+    value: String,
+    source: String,
+}
+
+impl Token {
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+}
+
 pub fn load_token() -> Result<Option<String>> {
+    Ok(load_token_with_source()?.map(|token| token.value))
+}
+
+pub fn load_token_with_source() -> Result<Option<Token>> {
     let path = token_path()?;
+    if let Some(token) = read_token_file(&path)? {
+        return Ok(Some(Token {
+            value: token,
+            source: path.display().to_string(),
+        }));
+    }
+
+    for name in ["PM_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] {
+        if let Some(token) = std::env::var(name)
+            .ok()
+            .map(|token| token.trim().to_string())
+            .filter(|token| !token.is_empty())
+        {
+            return Ok(Some(Token {
+                value: token,
+                source: format!("${name}"),
+            }));
+        }
+    }
+
+    if let Some(token) = gh_auth_token() {
+        return Ok(Some(Token {
+            value: token,
+            source: "gh auth token".into(),
+        }));
+    }
+
+    Ok(None)
+}
+
+fn read_token_file(path: &PathBuf) -> Result<Option<String>> {
     Ok(fs::read_to_string(path)
         .ok()
         .map(|token| token.trim().to_string())
         .filter(|token| !token.is_empty()))
+}
+
+fn gh_auth_token() -> Option<String> {
+    let output = Command::new("gh")
+        .args(["auth", "token"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
 }
 
 pub fn save_token(token: &str) -> Result<()> {
@@ -141,11 +213,15 @@ pub async fn login(client_id: Option<String>) -> Result<()> {
 
 pub async fn status() -> Result<()> {
     let path = token_path()?;
-    match validate_token(load_token()?.as_deref()).await? {
+    let token = load_token_with_source()?;
+    match validate_token(token.as_ref().map(Token::value)).await? {
         Some(login) => println!(
             "authenticated as {} ({})",
             login.bold().bright_green(),
-            path.display()
+            token
+                .as_ref()
+                .map(Token::source)
+                .unwrap_or_else(|| path.to_str().unwrap_or("unknown source"))
         ),
         None => println!("not authenticated ({})", path.display()),
     }
@@ -170,9 +246,9 @@ pub async fn validate_token(token: Option<&str>) -> Result<Option<String>> {
 }
 
 pub fn client() -> Result<octocrab::Octocrab> {
-    if let Some(token) = load_token()? {
+    if let Some(token) = load_token_with_source()? {
         return octocrab::Octocrab::builder()
-            .personal_token(token)
+            .personal_token(token.value)
             .build()
             .context("failed to build authenticated GitHub client");
     }
