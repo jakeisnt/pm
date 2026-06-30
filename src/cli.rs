@@ -29,6 +29,20 @@ pub enum Commands {
     Resolve {
         name: String,
     },
+    /// Create a new GitHub repository and clone it into the standard local path.
+    Create {
+        /// Repository name, or owner/name for an org/user repository.
+        name: String,
+        /// Create a public repository. Repositories are private by default.
+        #[arg(long, conflicts_with = "private")]
+        public: bool,
+        /// Create a private repository. This is the default.
+        #[arg(long)]
+        private: bool,
+        /// Optional GitHub repository description.
+        #[arg(short, long)]
+        description: Option<String>,
+    },
     List {
         #[arg(long)]
         source: Option<String>,

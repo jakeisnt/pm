@@ -11,6 +11,7 @@ use colored::{Color, Colorize};
 use inquire::Confirm;
 use project::Project;
 use regex::Regex;
+use serde::Deserialize;
 use skim::{prelude::*, tui::BorderType};
 use sqlx::SqlitePool;
 use std::{
@@ -54,6 +55,12 @@ async fn run() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Create {
+            name,
+            public,
+            private: _,
+            description,
+        }) => create_cmd(&pool, &name, public, description).await?,
         Some(Commands::List {
             source,
             scope,
@@ -154,6 +161,84 @@ fn infer_github_full_name_from_path(path: &str) -> Option<String> {
     Some(format!("{owner}/{repo}"))
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRepoResponse {
+    full_name: String,
+    clone_url: String,
+}
+
+async fn create_cmd(
+    db: &SqlitePool,
+    name: &str,
+    public: bool,
+    description: Option<String>,
+) -> Result<()> {
+    let token = github_auth::load_token()?
+        .context("GitHub authentication required; run `p github login` or `gh auth login` first")?;
+    let login = github_auth::validate_token(Some(&token))
+        .await?
+        .context("GitHub authentication is invalid; run `p github login` or `gh auth login`")?;
+
+    let (owner, repo) = if let Some((owner, repo)) = name.split_once('/') {
+        (owner.to_string(), repo.to_string())
+    } else {
+        (login.clone(), name.to_string())
+    };
+    validate_github_repo_parts(&owner, &repo)?;
+
+    let target = github_checkout_path(&owner, &repo)?;
+    if target.exists() {
+        bail!("local target already exists: {}", target.display());
+    }
+
+    let url = if owner.eq_ignore_ascii_case(&login) {
+        "https://api.github.com/user/repos".to_string()
+    } else {
+        format!("https://api.github.com/orgs/{owner}/repos")
+    };
+    let body = serde_json::json!({
+        "name": repo,
+        "private": !public,
+        "description": description,
+    });
+    let response = reqwest::Client::new()
+        .post(url)
+        .header(reqwest::header::USER_AGENT, "pm")
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .bearer_auth(&token)
+        .json(&body)
+        .send()
+        .await
+        .context("failed to call GitHub repository create API")?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        bail!("failed to create GitHub repository {owner}/{repo}: {status} {body}");
+    }
+    let repo_info = response
+        .json::<GitHubRepoResponse>()
+        .await
+        .context("failed to parse GitHub repository create response")?;
+
+    git_clone(
+        &repo_info.full_name,
+        &repo_info.clone_url,
+        &target,
+        Some(&token),
+    )?;
+    db::upsert_project(db, &target).await?;
+    println!("{}", target.display());
+    Ok(())
+}
+
+fn validate_github_repo_parts(owner: &str, repo: &str) -> Result<()> {
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        bail!("invalid GitHub repository name: {owner}/{repo}");
+    }
+    Ok(())
+}
+
 async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<Project>> {
     let Some((owner, repo)) = name.split_once('/') else {
         return Ok(None);
@@ -224,6 +309,32 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         .await?
         .with_context(|| format!("cloned {full_name}, but could not index it"))
         .map(Some)
+}
+
+fn git_clone(full_name: &str, clone_url: &str, target: &Path, token: Option<&str>) -> Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut clone = Command::new("git");
+    clone.arg("clone");
+    if let Some(token) = token {
+        clone
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
+            .env(
+                "GIT_CONFIG_VALUE_0",
+                format!("Authorization: Bearer {token}"),
+            );
+    }
+    let status = clone
+        .arg(clone_url)
+        .arg(target)
+        .status()
+        .context("failed to run git clone")?;
+    if !status.success() {
+        bail!("git clone failed for {full_name}");
+    }
+    Ok(())
 }
 
 fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {

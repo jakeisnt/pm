@@ -37,6 +37,10 @@ p -a
 # Resolve a project path
 p resolve pm
 
+# Create a new private GitHub repo and clone it under ~/Documents/<owner>/<repo>
+p create my-new-repo
+p create ulnd/my-new-repo --public --description "Demo project"
+
 # List all projects
 p list
 p list --json
