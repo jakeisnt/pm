@@ -39,7 +39,8 @@ p resolve pm
 
 # Create a new private GitHub repo and clone it under ~/Documents/<owner>/<repo>
 p create my-new-repo
-p create ulnd/my-new-repo --public --description "Demo project"
+p create ulnd/my-new-repo --description "Demo project"
+# Public repositories are intentionally refused by p; create those manually.
 
 # List all projects
 p list
@@ -69,8 +70,11 @@ p hook-install fish
 # Print the hook without installing it
 p hook zsh
 
-# Index the current git repository manually
+# Force a full reindex of configured local roots and accessible GitHub remotes
 p index
+
+# Index one git repository manually (used by shell hooks)
+p index /path/to/repo
 
 # Manage config.json
 p config list
@@ -87,7 +91,7 @@ p config delete searchDepth
 
 Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
 
-`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. `p index` records the local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too.
+`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. `p index <repo-path>` records that local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too. Running `p index` without a path forces a full reindex of configured local roots plus GitHub repositories accessible to your authenticated account.
 
 ## License
 

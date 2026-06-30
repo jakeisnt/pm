@@ -41,18 +41,54 @@ pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
     let path = git_repo_root(path)?.unwrap_or_else(|| path.to_path_buf());
     let name = path.file_name().unwrap().to_string_lossy();
     let remote = github_full_name(&path);
-    let owner = remote.as_deref().and_then(|full_name| {
-        full_name
-            .split_once('/')
-            .map(|(owner, _)| owner.to_string())
-    });
+    let owner = github_owner(remote.as_deref());
+    let path = path.to_string_lossy().to_string();
     let t = now();
-    sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name) VALUES(?1,?2,?3,?4,?4,1,?4,?4,'local',?5,'personal',COALESCE(?6,'_local')) ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,source='local',github_full_name=COALESCE(excluded.github_full_name,projects.github_full_name),org_name=COALESCE(?6,projects.org_name),updated_at=excluded.updated_at,deleted_at=NULL")
+
+    if let Some(full_name) = remote.as_deref() {
+        let remote_path = format!("github://{full_name}");
+        sqlx::query("UPDATE projects SET path=?1,name=?2,last_scanned=?3,last_modified=?3,is_git_repo=1,source='local',github_full_name=?4,org_name=?5,updated_at=?3,deleted_at=NULL WHERE path=?6 AND NOT EXISTS (SELECT 1 FROM projects WHERE path=?1)")
+            .bind(&path)
+            .bind(name.as_ref())
+            .bind(t)
+            .bind(full_name)
+            .bind(owner.as_deref().unwrap_or("_local"))
+            .bind(remote_path)
+            .execute(db)
+            .await?;
+    }
+
+    sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name) VALUES(?1,?2,?3,?4,?4,1,?4,?4,'local',?5,'personal',COALESCE(?6,'_local')) ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,is_git_repo=1,source='local',github_full_name=COALESCE(excluded.github_full_name,projects.github_full_name),org_name=COALESCE(?6,projects.org_name),updated_at=excluded.updated_at,deleted_at=NULL")
         .bind(Uuid::new_v4().to_string())
-        .bind(path.to_string_lossy().to_string())
+        .bind(path)
         .bind(name.as_ref())
         .bind(t)
         .bind(remote)
+        .bind(owner)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+fn github_owner(full_name: Option<&str>) -> Option<String> {
+    full_name.and_then(|full_name| {
+        full_name
+            .split_once('/')
+            .map(|(owner, _)| owner.to_string())
+    })
+}
+
+pub async fn upsert_remote_project(db: &SqlitePool, full_name: &str) -> Result<()> {
+    let Some((owner, repo)) = full_name.split_once('/') else {
+        anyhow::bail!("invalid GitHub repository name: {full_name}");
+    };
+    let t = now();
+    sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name) SELECT ?1,?2,?3,?4,?4,1,?4,?4,'remote',?5,'personal',?6 WHERE NOT EXISTS (SELECT 1 FROM projects WHERE github_full_name=?5 AND source='local') ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,source='remote',github_full_name=excluded.github_full_name,org_name=excluded.org_name,updated_at=excluded.updated_at,deleted_at=NULL")
+        .bind(Uuid::new_v4().to_string())
+        .bind(format!("github://{full_name}"))
+        .bind(repo)
+        .bind(t)
+        .bind(full_name)
         .bind(owner)
         .execute(db)
         .await?;
@@ -134,7 +170,8 @@ pub async fn mark_project_remote_only(db: &SqlitePool, id: &str, full_name: &str
     Ok(())
 }
 
-pub async fn scan(db: &SqlitePool) -> Result<()> {
+pub async fn scan(db: &SqlitePool) -> Result<usize> {
+    let mut indexed = 0;
     for root in config::roots() {
         if !root.exists() {
             continue;
@@ -146,10 +183,11 @@ pub async fn scan(db: &SqlitePool) -> Result<()> {
         {
             if e.file_type().is_dir() && e.path().join(".git").exists() {
                 upsert_project(db, e.path()).await?;
+                indexed += 1;
             }
         }
     }
-    Ok(())
+    Ok(indexed)
 }
 
 pub async fn projects(db: &SqlitePool) -> Result<Vec<Project>> {
