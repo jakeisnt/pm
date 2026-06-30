@@ -86,6 +86,10 @@ pub enum Commands {
         #[arg(short, long)]
         quiet: bool,
     },
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeCmd,
+    },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -121,4 +125,10 @@ pub enum GithubCmd {
     Status,
     /// Remove saved GitHub credentials.
     Logout,
+}
+
+#[derive(Subcommand)]
+pub enum WorktreeCmd {
+    #[command(alias = "co")]
+    Checkout { branch_name: String },
 }

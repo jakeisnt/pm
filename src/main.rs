@@ -6,7 +6,7 @@ mod project;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd, Shell};
+use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd, Shell, WorktreeCmd};
 use colored::{Color, Colorize};
 use inquire::Confirm;
 use project::Project;
@@ -74,6 +74,7 @@ async fn run() -> Result<()> {
         Some(Commands::Hook { shell }) => hook_cmd(shell),
         Some(Commands::HookInstall { shell }) => install_hook_cmd(shell)?,
         Some(Commands::Index { path, quiet }) => index_cmd(&pool, path, quiet).await?,
+        Some(Commands::Worktree { command }) => worktree_cmd(command)?,
         None => select_cmd(&pool, cli).await?,
     }
     Ok(())
@@ -588,6 +589,137 @@ async fn index_cmd(db: &SqlitePool, path: Option<String>, quiet: bool) -> Result
     Ok(())
 }
 
+fn worktree_cmd(cmd: WorktreeCmd) -> Result<()> {
+    match cmd {
+        WorktreeCmd::Checkout { branch_name } => worktree_checkout(&branch_name),
+    }
+}
+
+#[derive(Clone, Debug)]
+struct GitWorktree {
+    path: PathBuf,
+    branch: Option<String>,
+}
+
+fn worktree_checkout(branch: &str) -> Result<()> {
+    let cwd = env::current_dir()?;
+    let worktrees = git_worktrees(&cwd)?;
+    let primary = primary_worktree(&cwd, &worktrees)?;
+    ensure_branch_exists(&primary.path, branch)?;
+    ensure_clean(&primary.path, "primary worktree")?;
+    let source = worktrees
+        .iter()
+        .find(|w| w.branch.as_deref() == Some(branch));
+
+    let mut stash_ref = None;
+    if let Some(source) = source.filter(|w| w.path != primary.path) {
+        stash_ref = stash_worktree_changes(&source.path, branch)?;
+        run_git(&source.path, ["switch", "--detach"])?;
+    }
+
+    run_git(&primary.path, ["switch", branch])?;
+
+    if let Some(stash_ref) = stash_ref {
+        run_git(&primary.path, ["stash", "apply", "--index", &stash_ref])?;
+        drop_stash_if_still_top(&primary.path, &stash_ref)?;
+    }
+
+    println!(
+        "{} checked out {} in {}",
+        "ok:".green().bold(),
+        branch.bold(),
+        primary.path.display().to_string().dimmed()
+    );
+    Ok(())
+}
+
+fn git_worktrees(cwd: &Path) -> Result<Vec<GitWorktree>> {
+    let output = git_output(cwd, ["worktree", "list", "--porcelain"])?;
+    let mut worktrees = Vec::new();
+    let mut path = None;
+    let mut branch = None;
+
+    for line in output.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(path) = path.take() {
+                worktrees.push(GitWorktree {
+                    path,
+                    branch: branch.take(),
+                });
+            }
+        } else if let Some(value) = line.strip_prefix("worktree ") {
+            path = Some(PathBuf::from(value));
+        } else if let Some(value) = line.strip_prefix("branch refs/heads/") {
+            branch = Some(value.to_string());
+        }
+    }
+
+    if worktrees.is_empty() {
+        bail!("no git worktrees found");
+    }
+    Ok(worktrees)
+}
+
+fn primary_worktree(cwd: &Path, worktrees: &[GitWorktree]) -> Result<GitWorktree> {
+    let common_dir = git_output(
+        cwd,
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    let common_dir = PathBuf::from(common_dir.trim());
+    let common_parent = common_dir.parent();
+
+    worktrees
+        .iter()
+        .find(|w| Some(w.path.as_path()) == common_parent)
+        .or_else(|| worktrees.first())
+        .cloned()
+        .context("could not determine primary worktree")
+}
+
+fn stash_worktree_changes(path: &Path, branch: &str) -> Result<Option<String>> {
+    let status = git_output(path, ["status", "--porcelain"])?;
+    if status.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let before = git_output(path, ["rev-parse", "--verify", "-q", "refs/stash"]).ok();
+    run_git(
+        path,
+        [
+            "stash",
+            "push",
+            "-u",
+            "-m",
+            &format!("pm worktree checkout {branch}"),
+        ],
+    )?;
+    let after = git_output(path, ["rev-parse", "--verify", "-q", "stash@{0}"]).ok();
+    if before == after {
+        bail!("git stash did not create a stash for {}", path.display());
+    }
+    Ok(after)
+}
+
+fn ensure_branch_exists(path: &Path, branch: &str) -> Result<()> {
+    git_output(
+        path,
+        ["show-ref", "--verify", &format!("refs/heads/{branch}")],
+    )
+    .map(|_| ())
+    .with_context(|| format!("branch not found: {branch}"))
+}
+
+fn ensure_clean(path: &Path, label: &str) -> Result<()> {
+    let status = git_output(path, ["status", "--porcelain"])?;
+    if !status.trim().is_empty() {
+        bail!(
+            "{label} has uncommitted changes; commit, stash, or clean {} before moving worktrees",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 async fn index_remote_repos(db: &SqlitePool, quiet: bool) -> Result<usize> {
     let Some(token) = github_auth::load_token()? else {
         if !quiet {
@@ -947,4 +1079,40 @@ fn shell_name(shell: Shell) -> &'static str {
         Shell::Bash => "bash",
         Shell::Fish => "fish",
     }
+}
+
+fn drop_stash_if_still_top(path: &Path, stash_hash: &str) -> Result<()> {
+    let top = git_output(path, ["rev-parse", "--verify", "-q", "stash@{0}"])?;
+    if top.trim() != stash_hash.trim() {
+        bail!("applied stash {stash_hash}, but it is no longer stash@{{0}}; leaving it in place");
+    }
+    run_git(path, ["stash", "drop", "stash@{0}"])
+}
+
+fn git_output<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .context("failed to run git")?;
+    if !output.status.success() {
+        bail!(
+            "git command failed in {}: {}",
+            cwd.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(output.stdout)?.trim_end().to_string())
+}
+
+fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<()> {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .status()
+        .context("failed to run git")?;
+    if !status.success() {
+        bail!("git command failed in {}", cwd.display());
+    }
+    Ok(())
 }

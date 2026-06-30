@@ -50,6 +50,10 @@ p list --source local
 # Remove a project from disk
 p remove /path/to/project --force
 
+# Move a linked worktree branch back onto the primary checkout
+p worktree checkout <branch-name>
+p worktree co <branch-name>
+
 # Manage org visibility
 p org list
 p org hide <org>
