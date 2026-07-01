@@ -60,13 +60,23 @@ pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
 
     sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name) VALUES(?1,?2,?3,?4,?4,1,?4,?4,'local',?5,'personal',COALESCE(?6,'_local')) ON CONFLICT(path) DO UPDATE SET name=excluded.name,last_scanned=excluded.last_scanned,last_modified=excluded.last_modified,is_git_repo=1,source='local',github_full_name=COALESCE(excluded.github_full_name,projects.github_full_name),org_name=COALESCE(?6,projects.org_name),updated_at=excluded.updated_at,deleted_at=NULL")
         .bind(Uuid::new_v4().to_string())
-        .bind(path)
+        .bind(&path)
         .bind(name.as_ref())
         .bind(t)
-        .bind(remote)
+        .bind(remote.as_deref())
         .bind(owner)
         .execute(db)
         .await?;
+
+    if let Some(full_name) = remote.as_deref() {
+        sqlx::query("UPDATE projects SET deleted_at=?1,updated_at=?1 WHERE github_full_name=?2 AND source='remote' AND path<>?3")
+            .bind(t)
+            .bind(full_name)
+            .bind(&path)
+            .execute(db)
+            .await?;
+    }
+
     Ok(())
 }
 
@@ -192,7 +202,7 @@ pub async fn scan(db: &SqlitePool) -> Result<usize> {
 
 pub async fn projects(db: &SqlitePool) -> Result<Vec<Project>> {
     scan(db).await?;
-    let rows = sqlx::query("SELECT id,name,path,source,scope,github_full_name FROM projects WHERE deleted_at IS NULL ORDER BY lower(name)")
+    let rows = sqlx::query("SELECT id,name,path,source,scope,github_full_name FROM projects WHERE deleted_at IS NULL ORDER BY lower(name), CASE source WHEN 'local' THEN 0 ELSE 1 END, path")
         .fetch_all(db)
         .await?;
     Ok(rows
