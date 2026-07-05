@@ -17,7 +17,7 @@ use sqlx::SqlitePool;
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::Cursor,
+    io::{self, Cursor, IsTerminal},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -491,13 +491,22 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
     print_remove_target(&target, force);
 
     if !force {
-        eprintln!(
-            "{} refusing to delete without {}; re-run with {} to permanently delete the directory above",
-            "warning:".yellow().bold(),
-            "--force".bold(),
-            "--force".bold(),
-        );
-        return Ok(());
+        if can_prompt_for_remove() {
+            let prompt = format!("Delete {} permanently?", p.display().to_string().dimmed());
+            if !Confirm::new(&prompt).with_default(false).prompt()? {
+                println!("{} delete cancelled", "cancelled:".yellow().bold());
+                return Ok(());
+            }
+        } else {
+            eprintln!(
+                "{} refusing to delete without {} in {}; re-run with {} to permanently delete the directory above",
+                "warning:".yellow().bold(),
+                "--force".bold(),
+                terminal_interface().dimmed(),
+                "--force".bold(),
+            );
+            return Ok(());
+        }
     }
 
     fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))?;
@@ -566,6 +575,25 @@ async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<
         input.bold(),
         "p index".bold()
     )
+}
+
+fn can_prompt_for_remove() -> bool {
+    if env::var_os("CI").is_some() || env::var_os("GITHUB_ACTIONS").is_some() {
+        return false;
+    }
+
+    io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+fn terminal_interface() -> String {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return "a non-interactive terminal".to_string();
+    }
+
+    env::var("TERM_PROGRAM")
+        .map(|program| format!("{program} terminal"))
+        .or_else(|_| env::var("TERM").map(|term| format!("{term} terminal")))
+        .unwrap_or_else(|_| "this terminal".to_string())
 }
 
 fn print_remove_target(target: &RemoveTarget, force: bool) {
