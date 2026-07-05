@@ -168,15 +168,39 @@ pub async fn mark_project_remote_only(db: &SqlitePool, id: &str, full_name: &str
         anyhow::bail!("invalid GitHub repository name: {full_name}");
     };
     let t = now();
-    sqlx::query("UPDATE projects SET path=?1,name=?2,last_scanned=?3,last_modified=?3,source='remote',github_full_name=?4,org_name=?5,updated_at=?3,deleted_at=NULL WHERE id=?6")
-        .bind(format!("github://{full_name}"))
-        .bind(repo)
-        .bind(t)
-        .bind(full_name)
-        .bind(owner)
+    let remote_path = format!("github://{full_name}");
+
+    if let Some(existing_remote) = sqlx::query("SELECT id FROM projects WHERE path=?1 AND id<>?2")
+        .bind(&remote_path)
         .bind(id)
-        .execute(db)
-        .await?;
+        .fetch_optional(db)
+        .await?
+    {
+        let remote_id: String = existing_remote.get("id");
+        sqlx::query("UPDATE projects SET name=?1,last_scanned=?2,last_modified=?2,source='remote',github_full_name=?3,org_name=?4,updated_at=?2,deleted_at=NULL WHERE id=?5")
+            .bind(repo)
+            .bind(t)
+            .bind(full_name)
+            .bind(owner)
+            .bind(remote_id)
+            .execute(db)
+            .await?;
+        sqlx::query("UPDATE projects SET deleted_at=?1,updated_at=?1 WHERE id=?2")
+            .bind(t)
+            .bind(id)
+            .execute(db)
+            .await?;
+    } else {
+        sqlx::query("UPDATE projects SET path=?1,name=?2,last_scanned=?3,last_modified=?3,source='remote',github_full_name=?4,org_name=?5,updated_at=?3,deleted_at=NULL WHERE id=?6")
+            .bind(remote_path)
+            .bind(repo)
+            .bind(t)
+            .bind(full_name)
+            .bind(owner)
+            .bind(id)
+            .execute(db)
+            .await?;
+    }
     Ok(())
 }
 
@@ -271,4 +295,49 @@ pub async fn set_org_hidden(db: &SqlitePool, name: String, hidden: bool) -> Resu
         .execute(db)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_db() -> SqlitePool {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("connect in-memory sqlite");
+        migrate(&db).await.expect("migrate test database");
+        db
+    }
+
+    #[tokio::test]
+    async fn mark_project_remote_only_reuses_existing_remote_row() {
+        let db = test_db().await;
+        let t = now();
+        sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name,deleted_at) VALUES('local','/tmp/oya','oya',?1,?1,1,?1,?1,'local','ulnd/oya','personal','ulnd',NULL)")
+            .bind(t)
+            .execute(&db)
+            .await
+            .expect("insert local project");
+        sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name,deleted_at) VALUES('remote','github://ulnd/oya','oya',?1,?1,1,?1,?1,'remote','ulnd/oya','personal','ulnd',?1)")
+            .bind(t)
+            .execute(&db)
+            .await
+            .expect("insert deleted remote project");
+
+        mark_project_remote_only(&db, "local", "ulnd/oya")
+            .await
+            .expect("mark local project remote-only without path conflict");
+
+        let rows = sqlx::query("SELECT id,path,source,deleted_at FROM projects ORDER BY id")
+            .fetch_all(&db)
+            .await
+            .expect("fetch projects");
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].get::<Option<i64>, _>("deleted_at").is_some());
+        assert_eq!(rows[1].get::<String, _>("path"), "github://ulnd/oya");
+        assert_eq!(rows[1].get::<String, _>("source"), "remote");
+        assert!(rows[1].get::<Option<i64>, _>("deleted_at").is_none());
+    }
 }
