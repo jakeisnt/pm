@@ -66,7 +66,7 @@ async fn run() -> Result<()> {
             scope,
             json,
         }) => list(&pool, source, scope, json).await?,
-        Some(Commands::Remove { path, force }) => remove_cmd(path, force)?,
+        Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force).await?,
         Some(Commands::Dev) => dev_cmd()?,
         Some(Commands::Config { command }) => config_cmd(command)?,
         Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
@@ -484,19 +484,113 @@ async fn list(
     Ok(())
 }
 
-fn remove_cmd(path: Option<String>, force: bool) -> Result<()> {
-    let p = path.map(PathBuf::from).unwrap_or(env::current_dir()?);
+async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Result<()> {
+    let target = resolve_remove_target(db, path).await?;
+    let p = target.path();
+
+    print_remove_target(&target, force);
+
     if !force {
         eprintln!(
-            "{} refusing to delete without {}: {}",
+            "{} refusing to delete without {}; re-run with {} to permanently delete the directory above",
             "warning:".yellow().bold(),
             "--force".bold(),
-            p.display().to_string().dimmed()
+            "--force".bold(),
         );
         return Ok(());
     }
-    fs::remove_dir_all(&p)?;
+
+    fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))?;
+
+    if let RemoveTarget::Project(project) = &target {
+        if let Some(full_name) = project.github_full_name.as_deref() {
+            db::mark_project_remote_only(db, &project.id, full_name).await?;
+        } else {
+            db::mark_project_deleted(db, &project.id).await?;
+        }
+    }
+
+    println!(
+        "{} deleted {}",
+        "removed:".green().bold(),
+        p.display().to_string().dimmed()
+    );
     Ok(())
+}
+
+enum RemoveTarget {
+    Project(Project),
+    Path(PathBuf),
+}
+
+impl RemoveTarget {
+    fn path(&self) -> &Path {
+        match self {
+            RemoveTarget::Project(project) => Path::new(&project.path),
+            RemoveTarget::Path(path) => path,
+        }
+    }
+}
+
+async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<RemoveTarget> {
+    let Some(input) = path else {
+        return Ok(RemoveTarget::Path(env::current_dir()?));
+    };
+
+    let candidate = PathBuf::from(&input);
+    if candidate.exists() {
+        return Ok(RemoveTarget::Path(candidate));
+    }
+
+    if let Some(project) = db::find_project(db, &input).await? {
+        if project.path.starts_with("github://") {
+            bail!(
+                "found remote-only project {} at {}; there is no local directory to delete",
+                project.name.bold(),
+                project.path.dimmed()
+            );
+        }
+        let project_path = Path::new(&project.path);
+        if !project_path.exists() {
+            bail!(
+                "found project {} but its indexed path does not exist: {}",
+                project.name.bold(),
+                project.path.dimmed()
+            );
+        }
+        return Ok(RemoveTarget::Project(project));
+    }
+
+    bail!(
+        "no file, directory, or indexed project found for {}; run {} to refresh the project index",
+        input.bold(),
+        "p index".bold()
+    )
+}
+
+fn print_remove_target(target: &RemoveTarget, force: bool) {
+    let action = if force { "deleting" } else { "would delete" };
+    println!("{}", format!("{action}:").yellow().bold());
+    match target {
+        RemoveTarget::Project(project) => {
+            println!("  {} {}", "project:".bold(), style_name(&project.name));
+            println!("  {} {}", "path:".bold(), style_path(&project.path));
+            println!("  {} {}", "source:".bold(), project.source.dimmed());
+            if let Some(scope) = project.scope.as_deref() {
+                println!("  {} {}", "scope:".bold(), scope.dimmed());
+            }
+            if let Some(full_name) = project.github_full_name.as_deref() {
+                println!("  {} {}", "github:".bold(), full_name.dimmed());
+            }
+        }
+        RemoveTarget::Path(path) => {
+            println!(
+                "  {} {}",
+                "path:".bold(),
+                path.display().to_string().dimmed()
+            );
+        }
+    }
 }
 
 fn dev_cmd() -> Result<()> {

@@ -180,6 +180,16 @@ pub async fn mark_project_remote_only(db: &SqlitePool, id: &str, full_name: &str
     Ok(())
 }
 
+pub async fn mark_project_deleted(db: &SqlitePool, id: &str) -> Result<()> {
+    let t = now();
+    sqlx::query("UPDATE projects SET deleted_at=?1,updated_at=?1 WHERE id=?2")
+        .bind(t)
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
 pub async fn scan(db: &SqlitePool) -> Result<usize> {
     let mut indexed = 0;
     for root in config::roots() {
