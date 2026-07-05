@@ -519,14 +519,29 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
         }
     }
 
-    fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))?;
-
     if let RemoveTarget::Project(project) = &target {
-        if let Some(full_name) = project.github_full_name.as_deref() {
-            db::mark_project_remote_only(db, &project.id, full_name).await?;
-        } else {
-            db::mark_project_deleted(db, &project.id).await?;
+        db::begin_immediate_transaction(db).await?;
+        let mark_result = async {
+            if let Some(full_name) = project.github_full_name.as_deref() {
+                db::mark_project_remote_only(db, &project.id, full_name).await
+            } else {
+                db::mark_project_deleted(db, &project.id).await
+            }
         }
+        .await;
+        if let Err(error) = mark_result {
+            let _ = db::rollback_transaction(db).await;
+            return Err(error);
+        }
+
+        if let Err(error) = fs::remove_dir_all(p) {
+            let _ = db::rollback_transaction(db).await;
+            return Err(error).with_context(|| format!("failed to delete {}", p.display()));
+        }
+
+        db::commit_transaction(db).await?;
+    } else {
+        fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))?;
     }
 
     println!(

@@ -37,6 +37,21 @@ fn now() -> i64 {
         .as_millis() as i64
 }
 
+pub async fn begin_immediate_transaction(db: &SqlitePool) -> Result<()> {
+    sqlx::query("BEGIN IMMEDIATE").execute(db).await?;
+    Ok(())
+}
+
+pub async fn commit_transaction(db: &SqlitePool) -> Result<()> {
+    sqlx::query("COMMIT").execute(db).await?;
+    Ok(())
+}
+
+pub async fn rollback_transaction(db: &SqlitePool) -> Result<()> {
+    sqlx::query("ROLLBACK").execute(db).await?;
+    Ok(())
+}
+
 pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
     let path = git_repo_root(path)?.unwrap_or_else(|| path.to_path_buf());
     let name = path.file_name().unwrap().to_string_lossy();
