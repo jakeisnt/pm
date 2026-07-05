@@ -284,7 +284,17 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         "{full_name} is not available locally. Clone it to {}?",
         target.display()
     );
-    if !Confirm::new(&prompt).with_default(true).prompt()? {
+    if can_prompt_interactively() {
+        if !Confirm::new(&prompt).with_default(true).prompt()? {
+            return Ok(None);
+        }
+    } else {
+        eprintln!(
+            "{} {} is not available locally in {}; skipping interactive clone prompt",
+            "warning:".yellow().bold(),
+            full_name.bold(),
+            terminal_interface().dimmed(),
+        );
         return Ok(None);
     }
 
@@ -491,7 +501,7 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
     print_remove_target(&target, force);
 
     if !force {
-        if can_prompt_for_remove() {
+        if can_prompt_interactively() {
             let prompt = format!("Delete {} permanently?", p.display().to_string().dimmed());
             if !Confirm::new(&prompt).with_default(false).prompt()? {
                 println!("{} delete cancelled", "cancelled:".yellow().bold());
@@ -577,7 +587,7 @@ async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<
     )
 }
 
-fn can_prompt_for_remove() -> bool {
+fn can_prompt_interactively() -> bool {
     if env::var_os("CI").is_some() || env::var_os("GITHUB_ACTIONS").is_some() {
         return false;
     }
