@@ -5,6 +5,7 @@ mod github_auth;
 mod project;
 
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd, Shell, WorktreeCmd};
 use colored::{Color, Colorize};
@@ -185,8 +186,8 @@ async fn create_cmd(
         );
     }
 
-    let token = github_auth::load_token()?
-        .context("GitHub authentication required; run `p github login` or `gh auth login` first")?;
+    let token = load_github_token_or_prompt_login()?
+        .context("GitHub authentication required; run `gh auth login` or `p github login` first")?;
     let login = github_auth::validate_token(Some(&token))
         .await?
         .context("GitHub authentication is invalid; run `p github login` or `gh auth login`")?;
@@ -259,13 +260,13 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         return Ok(None);
     }
 
+    let token = load_github_token_or_prompt_login()?;
     let github = github_auth::client()?;
-    let token = github_auth::load_token()?;
     let repo_info = github.repos(owner, repo).get().await.with_context(|| {
         let auth_hint = if token.is_some() {
             "check that your token has private-repository access and org SSO authorization"
         } else {
-            "authenticate with `p github login` or `gh auth login` to access private repositories"
+            "authenticate with `gh auth login` or `p github login` to access private repositories"
         };
         format!("GitHub repository not found or inaccessible: {owner}/{repo}; {auth_hint}")
     })?;
@@ -312,10 +313,7 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         clone
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "http.extraHeader")
-            .env(
-                "GIT_CONFIG_VALUE_0",
-                format!("Authorization: Bearer {token}"),
-            );
+            .env("GIT_CONFIG_VALUE_0", github_git_auth_header(token));
     }
     let status = clone
         .arg(&clone_url)
@@ -333,6 +331,46 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         .map(Some)
 }
 
+fn load_github_token_or_prompt_login() -> Result<Option<String>> {
+    let token = github_auth::load_token()?;
+    if token.is_some() || !can_prompt_interactively() || !gh_cli_available() {
+        return Ok(token);
+    }
+
+    if !Confirm::new("No GitHub token found. Run `gh auth login` now?")
+        .with_default(true)
+        .prompt()?
+    {
+        return Ok(None);
+    }
+
+    let status = Command::new("gh")
+        .args(["auth", "login"])
+        .status()
+        .context("failed to run gh auth login")?;
+    if !status.success() {
+        bail!("gh auth login failed");
+    }
+
+    github_auth::load_token()
+}
+
+fn gh_cli_available() -> bool {
+    Command::new("gh")
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn github_git_auth_header(token: &str) -> String {
+    let credentials = BASE64.encode(format!("x-access-token:{token}"));
+    format!("Authorization: Basic {credentials}")
+}
+
 fn git_clone(full_name: &str, clone_url: &str, target: &Path, token: Option<&str>) -> Result<()> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)?;
@@ -343,10 +381,7 @@ fn git_clone(full_name: &str, clone_url: &str, target: &Path, token: Option<&str
         clone
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "http.extraHeader")
-            .env(
-                "GIT_CONFIG_VALUE_0",
-                format!("Authorization: Bearer {token}"),
-            );
+            .env("GIT_CONFIG_VALUE_0", github_git_auth_header(token));
     }
     let status = clone
         .arg(clone_url)
