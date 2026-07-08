@@ -9,7 +9,10 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use clap::Parser;
 use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd, Shell, WorktreeCmd};
 use colored::{Color, Colorize};
-use inquire::Confirm;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    terminal,
+};
 use project::Project;
 use regex::Regex;
 use serde::Deserialize;
@@ -18,7 +21,7 @@ use sqlx::SqlitePool;
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{self, Cursor, IsTerminal},
+    io::{self, Cursor, IsTerminal, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -286,7 +289,7 @@ async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<P
         target.display()
     );
     if can_prompt_interactively() {
-        if !Confirm::new(&prompt).with_default(true).prompt()? {
+        if !confirm_yes_no(&prompt, true)? {
             return Ok(None);
         }
     } else {
@@ -337,10 +340,7 @@ fn load_github_token_or_prompt_login() -> Result<Option<String>> {
         return Ok(token);
     }
 
-    if !Confirm::new("No GitHub token found. Run `gh auth login` now?")
-        .with_default(true)
-        .prompt()?
-    {
+    if !confirm_yes_no("No GitHub token found. Run `gh auth login` now?", true)? {
         return Ok(None);
     }
 
@@ -538,7 +538,7 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
     if !force {
         if can_prompt_interactively() {
             let prompt = format!("Delete {} permanently?", p.display().to_string().dimmed());
-            if !Confirm::new(&prompt).with_default(false).prompt()? {
+            if !confirm_yes_no(&prompt, false)? {
                 println!("{} delete cancelled", "cancelled:".yellow().bold());
                 return Ok(());
             }
@@ -635,6 +635,44 @@ async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<
         input.bold(),
         "p index".bold()
     )
+}
+
+fn confirm_yes_no(prompt: &str, default: bool) -> Result<bool> {
+    let suffix = if default { " [Y/n] " } else { " [y/N] " };
+    print!("{prompt}{suffix}");
+    io::stdout().flush()?;
+
+    terminal::enable_raw_mode().context("failed to enable raw terminal mode")?;
+    let result = loop {
+        let event = match event::read().context("failed to read terminal input") {
+            Ok(event) => event,
+            Err(error) => break Err(error),
+        };
+        match event {
+            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => break Ok(true),
+                KeyCode::Char('n') | KeyCode::Char('N') => break Ok(false),
+                KeyCode::Enter => break Ok(default),
+                KeyCode::Esc => break Ok(false),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    break Err(anyhow::anyhow!("confirmation interrupted"));
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    };
+    let disable_result =
+        terminal::disable_raw_mode().context("failed to disable raw terminal mode");
+
+    match (&result, default) {
+        (Ok(true), _) => println!("y"),
+        (Ok(false), _) => println!("n"),
+        (Err(_), _) => println!(),
+    }
+
+    disable_result?;
+    result
 }
 
 fn can_prompt_interactively() -> bool {
