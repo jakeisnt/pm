@@ -51,8 +51,9 @@ p list --source local
 p remove /path/to/project --force
 
 # Rename a project locally and on GitHub
-p rename old-name new-name
-p r old-name new-name
+# First argument: current name. Second argument: desired new name.
+p rename <old-name> <new-name>
+p r <old-name> <new-name>
 
 # Move a linked worktree branch back onto the primary checkout
 p worktree checkout <branch-name>

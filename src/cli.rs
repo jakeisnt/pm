@@ -60,9 +60,9 @@ pub enum Commands {
     #[command(alias = "r")]
     Rename {
         /// Current project name.
-        project: String,
-        /// New project name.
-        name: String,
+        old_name: String,
+        /// Desired new project name.
+        new_name: String,
     },
     Dev,
     Config {
@@ -152,8 +152,8 @@ mod tests {
                 Cli::try_parse_from(["p", command, "old", "new"]).expect("parse rename command");
             assert!(matches!(
                 cli.command,
-                Some(Commands::Rename { project, name })
-                    if project == "old" && name == "new"
+                Some(Commands::Rename { old_name, new_name })
+                    if old_name == "old" && new_name == "new"
             ));
         }
     }

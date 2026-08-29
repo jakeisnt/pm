@@ -71,7 +71,9 @@ async fn run() -> Result<()> {
             json,
         }) => list(&pool, source, scope, json).await?,
         Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force).await?,
-        Some(Commands::Rename { project, name }) => rename_cmd(&pool, &project, &name).await?,
+        Some(Commands::Rename { old_name, new_name }) => {
+            rename_cmd(&pool, &old_name, &new_name).await?
+        }
         Some(Commands::Dev) => dev_cmd()?,
         Some(Commands::Config { command }) => config_cmd(command)?,
         Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
