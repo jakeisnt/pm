@@ -71,6 +71,7 @@ async fn run() -> Result<()> {
             json,
         }) => list(&pool, source, scope, json).await?,
         Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force).await?,
+        Some(Commands::Rename { project, name }) => rename_cmd(&pool, &project, &name).await?,
         Some(Commands::Dev) => dev_cmd()?,
         Some(Commands::Config { command }) => config_cmd(command)?,
         Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
@@ -585,6 +586,139 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
         p.display().to_string().dimmed()
     );
     Ok(())
+}
+
+async fn rename_cmd(db: &SqlitePool, project_name: &str, new_name: &str) -> Result<()> {
+    validate_project_name(new_name)?;
+    let project = db::find_project(db, project_name)
+        .await?
+        .with_context(|| format!("no project found for {project_name}"))?;
+
+    let local_paths = if project.path.starts_with("github://") {
+        None
+    } else {
+        let old_path = PathBuf::from(&project.path);
+        if !old_path.exists() {
+            bail!("project path does not exist: {}", old_path.display());
+        }
+        let parent = old_path
+            .parent()
+            .context("cannot rename a project without a parent directory")?;
+        let new_path = parent.join(new_name);
+        if new_path.exists() {
+            bail!("rename target already exists: {}", new_path.display());
+        }
+        Some((old_path, new_path))
+    };
+
+    let new_github_full_name = if let Some(old_full_name) = project.github_full_name.as_deref() {
+        let (owner, _) = old_full_name
+            .split_once('/')
+            .with_context(|| format!("invalid indexed GitHub repository name: {old_full_name}"))?;
+        let full_name = rename_github_repository(old_full_name, new_name).await?;
+        if full_name != format!("{owner}/{new_name}") {
+            bail!("GitHub returned an unexpected repository name after rename: {full_name}");
+        }
+        Some(full_name)
+    } else {
+        None
+    };
+
+    if let Some((old_path, new_path)) = &local_paths {
+        fs::rename(old_path, new_path).with_context(|| {
+            format!(
+                "GitHub was renamed, but failed to rename {} to {}",
+                old_path.display(),
+                new_path.display()
+            )
+        })?;
+    }
+
+    let indexed_path = local_paths
+        .as_ref()
+        .map(|(_, new_path)| new_path.clone())
+        .or_else(|| {
+            new_github_full_name
+                .as_ref()
+                .map(|full_name| PathBuf::from(format!("github://{full_name}")))
+        })
+        .context("renamed project has neither a local path nor a GitHub repository")?;
+    db::rename_project(
+        db,
+        &project.id,
+        new_name,
+        &indexed_path,
+        new_github_full_name.as_deref(),
+    )
+    .await?;
+
+    if let (Some((_, new_path)), Some(old_full_name), Some(new_full_name)) = (
+        local_paths.as_ref(),
+        project.github_full_name.as_deref(),
+        new_github_full_name.as_deref(),
+    ) {
+        update_github_remote(new_path, old_full_name, new_full_name)?;
+    }
+
+    println!(
+        "{} {} → {}",
+        "renamed:".green().bold(),
+        project.name.dimmed(),
+        new_name.bold()
+    );
+    Ok(())
+}
+
+fn validate_project_name(name: &str) -> Result<()> {
+    let mut components = Path::new(name).components();
+    if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+        || components.next().is_some()
+    {
+        bail!("project name must be a single directory name");
+    }
+    if !name
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || ".-_".contains(character))
+    {
+        bail!(
+            "project name may only contain ASCII letters, numbers, periods, hyphens, and underscores"
+        );
+    }
+    Ok(())
+}
+
+async fn rename_github_repository(old_full_name: &str, new_name: &str) -> Result<String> {
+    let token = load_github_token_or_prompt_login()?
+        .context("GitHub authentication required; run `gh auth login` or `p github login` first")?;
+    let response = reqwest::Client::new()
+        .patch(format!("https://api.github.com/repos/{old_full_name}"))
+        .header(reqwest::header::USER_AGENT, "pm")
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "name": new_name }))
+        .send()
+        .await
+        .context("failed to call GitHub repository rename API")?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        bail!("failed to rename GitHub repository {old_full_name}: {status} {body}");
+    }
+    let repo = response
+        .json::<GitHubRepoResponse>()
+        .await
+        .context("failed to parse GitHub repository rename response")?;
+    Ok(repo.full_name)
+}
+
+fn update_github_remote(path: &Path, old_full_name: &str, new_full_name: &str) -> Result<()> {
+    let old_url = git_output(path, ["remote", "get-url", "origin"])?;
+    let new_url = old_url.replace(old_full_name, new_full_name);
+    if new_url == old_url {
+        bail!("renamed project, but could not recognize the GitHub origin URL: {old_url}");
+    }
+    run_git(path, ["remote", "set-url", "origin", &new_url])
 }
 
 enum RemoveTarget {

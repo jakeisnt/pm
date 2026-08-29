@@ -56,6 +56,14 @@ pub enum Commands {
         #[arg(short, long)]
         force: bool,
     },
+    /// Rename a project locally and on GitHub.
+    #[command(alias = "r")]
+    Rename {
+        /// Current project name.
+        project: String,
+        /// New project name.
+        name: String,
+    },
     Dev,
     Config {
         #[command(subcommand)]
@@ -131,4 +139,22 @@ pub enum GithubCmd {
 pub enum WorktreeCmd {
     #[command(alias = "co")]
     Checkout { branch_name: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename_accepts_long_name_and_short_alias() {
+        for command in ["rename", "r"] {
+            let cli =
+                Cli::try_parse_from(["p", command, "old", "new"]).expect("parse rename command");
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Rename { project, name })
+                    if project == "old" && name == "new"
+            ));
+        }
+    }
 }

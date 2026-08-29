@@ -229,6 +229,28 @@ pub async fn mark_project_deleted(db: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn rename_project(
+    db: &SqlitePool,
+    id: &str,
+    name: &str,
+    path: &Path,
+    github_full_name: Option<&str>,
+) -> Result<()> {
+    let t = now();
+    let result = sqlx::query("UPDATE projects SET name=?1,path=?2,github_full_name=?3,last_modified=?4,updated_at=?4 WHERE id=?5 AND deleted_at IS NULL")
+        .bind(name)
+        .bind(path.to_string_lossy().as_ref())
+        .bind(github_full_name)
+        .bind(t)
+        .bind(id)
+        .execute(db)
+        .await?;
+    if result.rows_affected() == 0 {
+        anyhow::bail!("project no longer exists in the index");
+    }
+    Ok(())
+}
+
 pub async fn scan(db: &SqlitePool) -> Result<usize> {
     let mut indexed = 0;
     for root in config::roots() {
@@ -354,5 +376,47 @@ mod tests {
         assert_eq!(rows[1].get::<String, _>("path"), "github://ulnd/oya");
         assert_eq!(rows[1].get::<String, _>("source"), "remote");
         assert!(rows[1].get::<Option<i64>, _>("deleted_at").is_none());
+    }
+
+    #[tokio::test]
+    async fn rename_project_preserves_identity_and_history() {
+        let db = test_db().await;
+        let t = now();
+        sqlx::query("INSERT INTO projects(id,path,name,last_scanned,last_modified,is_git_repo,created_at,updated_at,source,github_full_name,scope,org_name) VALUES('project','/tmp/old','old',?1,?1,1,?1,?1,'local','ulnd/old','personal','ulnd')")
+            .bind(t)
+            .execute(&db)
+            .await
+            .expect("insert project");
+        sqlx::query("INSERT INTO project_history(id,project_id,opened_at,created_at,updated_at) VALUES('history','project',?1,?1,?1)")
+            .bind(t)
+            .execute(&db)
+            .await
+            .expect("insert history");
+
+        rename_project(
+            &db,
+            "project",
+            "new",
+            Path::new("/tmp/new"),
+            Some("ulnd/new"),
+        )
+        .await
+        .expect("rename indexed project");
+
+        let row =
+            sqlx::query("SELECT id,name,path,github_full_name FROM projects WHERE id='project'")
+                .fetch_one(&db)
+                .await
+                .expect("fetch renamed project");
+        assert_eq!(row.get::<String, _>("id"), "project");
+        assert_eq!(row.get::<String, _>("name"), "new");
+        assert_eq!(row.get::<String, _>("path"), "/tmp/new");
+        assert_eq!(row.get::<String, _>("github_full_name"), "ulnd/new");
+        let history_count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM project_history WHERE project_id='project'")
+                .fetch_one(&db)
+                .await
+                .expect("fetch history");
+        assert_eq!(history_count, 1);
     }
 }
