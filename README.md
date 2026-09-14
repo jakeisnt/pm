@@ -10,6 +10,28 @@ cargo install --path .
 
 The CLI binary is `p`.
 
+## Nix
+
+The repository provides a flake package. To use `p` in another flake, add it as an input and include the package in your development shell:
+
+```nix
+{
+  inputs.pm.url = "github:jakeisnt/pm";
+
+  outputs = { nixpkgs, pm, ... }:
+    let
+      system = "aarch64-darwin"; # or x86_64-linux, etc.
+      pkgs = import nixpkgs { inherit system; };
+    in {
+      devShells.${system}.default = pkgs.mkShell {
+        packages = [ pm.packages.${system}.default ];
+      };
+    };
+}
+```
+
+For a one-off install, use `nix profile install github:jakeisnt/pm`. The package can also be run directly with `nix run github:jakeisnt/pm`.
+
 ## Development
 
 This repository pins Rust in `rust-toolchain.toml`.
