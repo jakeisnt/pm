@@ -6,6 +6,7 @@ mod github;
 mod github_auth;
 mod project;
 mod shell;
+mod sync;
 mod ui;
 mod worktree;
 
@@ -15,13 +16,13 @@ use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd};
 use colored::Colorize;
 use github::GitHub;
 use project::Project;
-use sqlx::SqlitePool;
+use rusqlite::Connection;
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{self, IsTerminal},
     path::{Path, PathBuf},
     process::Command,
+    time::Duration,
 };
 
 #[tokio::main]
@@ -47,8 +48,10 @@ async fn run() -> Result<()> {
         _ => {}
     }
 
-    let pool = db::connect().await?;
-    db::migrate(&pool).await?;
+    let pool = db::open()?;
+    if !matches!(cli.command, Some(Commands::Index { .. })) {
+        refresh_index(&pool);
+    }
 
     match cli.command {
         Some(Commands::Resolve { name }) => match project::resolve(&pool, &name).await? {
@@ -65,16 +68,16 @@ async fn run() -> Result<()> {
             source,
             scope,
             json,
-        }) => list(&pool, source, scope, json).await?,
-        Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force).await?,
+        }) => list(&pool, source, scope, json)?,
+        Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force)?,
         Some(Commands::Rename { old_name, new_name }) => {
             rename_cmd(&pool, &old_name, &new_name).await?
         }
         Some(Commands::Dev) => dev_cmd()?,
         Some(Commands::Config { command }) => config_cmd(command)?,
-        Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
+        Some(Commands::Org { command }) => org_cmd(&pool, command)?,
         Some(Commands::Github { command }) => github_cmd(command).await?,
-        Some(Commands::Index { path, quiet }) => index_cmd(&pool, path, quiet).await?,
+        Some(cmd @ Commands::Index { .. }) => index_cmd(&pool, cmd).await?,
         Some(Commands::Hook { .. } | Commands::HookInstall { .. } | Commands::Worktree { .. }) => {
             unreachable!("handled before connecting to the database")
         }
@@ -83,15 +86,22 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
+/// Kick off a background sync if the index is stale; never fails a command.
+fn refresh_index(db: &Connection) {
+    if let Err(e) = sync::refresh_in_background(db) {
+        ui::warn(&format!("background sync not started: {e:#}"));
+    }
+}
+
+async fn select_cmd(db: &Connection, cli: Cli) -> Result<()> {
     if cli.json {
-        println!("{}", serde_json::to_string(&db::projects(db).await?)?);
+        println!("{}", serde_json::to_string(&db::projects(db)?)?);
         return Ok(());
     }
     let Some(p) = project::resolve_or_pick(db, cli.name.as_deref()).await? else {
         return Ok(());
     };
-    db::touch(db, &p).await?;
+    db::touch(db, &p)?;
 
     if cli.path || cli.silent {
         if cli.path {
@@ -113,15 +123,10 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
 /// contains the current directory.
 async fn worktree_cmd(project: Option<String>, command: Option<cli::WorktreeCmd>) -> Result<()> {
     if let Some(name) = project {
-        let db = db::connect().await?;
-        db::migrate(&db).await?;
-        let found = if io::stdin().is_terminal() {
-            project::resolve_or_pick(&db, Some(&name)).await?
-        } else {
-            project::resolve(&db, &name).await?
-        };
-        let Some(project) = found else {
-            bail!("no project found for {name}");
+        let db = db::open()?;
+        refresh_index(&db);
+        let Some(project) = project::resolve_or_pick(&db, Some(&name)).await? else {
+            return Ok(());
         };
         env::set_current_dir(&project.path)
             .with_context(|| format!("cannot enter {}", project.path))?;
@@ -135,7 +140,7 @@ async fn worktree_cmd(project: Option<String>, command: Option<cli::WorktreeCmd>
 }
 
 async fn create_cmd(
-    db: &SqlitePool,
+    db: &Connection,
     name: &str,
     public: bool,
     description: Option<String>,
@@ -165,7 +170,7 @@ async fn create_cmd(
         .create_repo(org, repo, description.as_deref())
         .await?;
     git::clone(&created.clone_url, &target, github.token())?;
-    db::upsert_project(db, &target).await?;
+    db::upsert_project(db, &target)?;
     println!("{}", target.display());
     Ok(())
 }
@@ -177,13 +182,8 @@ fn validate_github_repo_parts(owner: &str, repo: &str) -> Result<()> {
     Ok(())
 }
 
-async fn list(
-    db: &SqlitePool,
-    source: Option<String>,
-    scope: Option<String>,
-    json: bool,
-) -> Result<()> {
-    let mut ps = db::projects(db).await?;
+fn list(db: &Connection, source: Option<String>, scope: Option<String>, json: bool) -> Result<()> {
+    let mut ps = db::projects(db)?;
     if let Some(s) = source {
         ps.retain(|p| p.source == s);
     }
@@ -210,8 +210,8 @@ async fn list(
     Ok(())
 }
 
-async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Result<()> {
-    let target = resolve_remove_target(db, path).await?;
+fn remove_cmd(db: &Connection, path: Option<String>, force: bool) -> Result<()> {
+    let target = resolve_remove_target(db, path)?;
     let p = target.path();
 
     print_remove_target(&target, force);
@@ -235,26 +235,14 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
     }
 
     if let RemoveTarget::Project(project) = &target {
-        db::begin_immediate_transaction(db).await?;
-        let mark_result = async {
-            if let Some(full_name) = project.github_full_name.as_deref() {
-                db::mark_project_remote_only(db, &project.id, full_name).await
-            } else {
-                db::mark_project_deleted(db, &project.id).await
+        // Only forget the project if the directory is really gone.
+        db::transaction(db, || {
+            match project.github_full_name.as_deref() {
+                Some(full_name) => db::mark_project_remote_only(db, &project.id, full_name)?,
+                None => db::mark_project_deleted(db, &project.id)?,
             }
-        }
-        .await;
-        if let Err(error) = mark_result {
-            let _ = db::rollback_transaction(db).await;
-            return Err(error);
-        }
-
-        if let Err(error) = fs::remove_dir_all(p) {
-            let _ = db::rollback_transaction(db).await;
-            return Err(error).with_context(|| format!("failed to delete {}", p.display()));
-        }
-
-        db::commit_transaction(db).await?;
+            fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))
+        })?;
     } else {
         fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))?;
     }
@@ -267,10 +255,9 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
     Ok(())
 }
 
-async fn rename_cmd(db: &SqlitePool, project_name: &str, new_name: &str) -> Result<()> {
+async fn rename_cmd(db: &Connection, project_name: &str, new_name: &str) -> Result<()> {
     validate_project_name(new_name)?;
-    let project = db::find_project(db, project_name)
-        .await?
+    let project = db::find_project(db, project_name)?
         .with_context(|| format!("no project found for {project_name}"))?;
 
     let local_paths = if project.path.starts_with("github://") {
@@ -331,8 +318,7 @@ async fn rename_cmd(db: &SqlitePool, project_name: &str, new_name: &str) -> Resu
         new_name,
         &indexed_path,
         new_github_full_name.as_deref(),
-    )
-    .await?;
+    )?;
 
     if let (Some((_, new_path)), Some(old_full_name), Some(new_full_name)) = (
         local_paths.as_ref(),
@@ -392,7 +378,7 @@ impl RemoveTarget {
     }
 }
 
-async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<RemoveTarget> {
+fn resolve_remove_target(db: &Connection, path: Option<String>) -> Result<RemoveTarget> {
     let Some(input) = path else {
         return Ok(RemoveTarget::Path(env::current_dir()?));
     };
@@ -402,7 +388,7 @@ async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<
         return Ok(RemoveTarget::Path(candidate));
     }
 
-    if let Some(project) = db::find_project(db, &input).await? {
+    if let Some(project) = db::find_project(db, &input)? {
         if project.path.starts_with("github://") {
             bail!(
                 "found remote-only project {} at {}; there is no local directory to delete",
@@ -469,38 +455,48 @@ fn dev_cmd() -> Result<()> {
 }
 
 fn config_cmd(cmd: ConfigCmd) -> Result<()> {
-    let path = config::config_path()?;
-    let mut v: serde_json::Value = fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(serde_json::json!({}));
+    let path = config::active_path()?;
+    let mut v: serde_json::Value = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text)
+            .with_context(|| format!("{} is not valid JSON", path.display()))?,
+        Err(_) => serde_json::json!({}),
+    };
     match cmd {
-        ConfigCmd::List => println!("{}", serde_json::to_string_pretty(&v)?),
+        ConfigCmd::List => {
+            ui::info(&format!("config @ {}", ui::tildify(&path)));
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            return Ok(());
+        }
+        // `3` and `["~/code"]` are stored as JSON; anything else as a string.
         ConfigCmd::Set { key, value } => {
-            v[&key] = serde_json::Value::String(value);
-            fs::write(path, serde_json::to_string_pretty(&v)?)?
+            v[&key] = serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value))
         }
         ConfigCmd::Delete { key } => {
-            v.as_object_mut().map(|o| o.remove(&key));
-            fs::write(path, serde_json::to_string_pretty(&v)?)?
+            if let Some(o) = v.as_object_mut() {
+                o.remove(&key);
+            }
         }
     }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(&v)? + "\n")?;
     Ok(())
 }
 
-async fn org_cmd(db: &SqlitePool, cmd: OrgCmd) -> Result<()> {
+fn org_cmd(db: &Connection, cmd: OrgCmd) -> Result<()> {
     match cmd {
         OrgCmd::List => {
-            for (n, h) in db::orgs(db).await? {
-                if h != 0 {
+            for (n, hidden) in db::orgs(db)? {
+                if hidden {
                     println!("{} {}", ui::style_name(&n), "(hidden)".yellow());
                 } else {
                     println!("{}", ui::style_name(&n));
                 }
             }
         }
-        OrgCmd::Hide { name } => db::set_org_hidden(db, name, true).await?,
-        OrgCmd::Show { name } => db::set_org_hidden(db, name, false).await?,
+        OrgCmd::Hide { name } => db::set_org_hidden(db, &name, true)?,
+        OrgCmd::Show { name } => db::set_org_hidden(db, &name, false)?,
     }
     Ok(())
 }
@@ -514,48 +510,41 @@ async fn github_cmd(cmd: GithubCmd) -> Result<()> {
     Ok(())
 }
 
-async fn index_cmd(db: &SqlitePool, path: Option<String>, quiet: bool) -> Result<()> {
+async fn index_cmd(db: &Connection, cmd: Commands) -> Result<()> {
+    let Commands::Index {
+        path,
+        quiet,
+        watch,
+        interval,
+        background,
+    } = cmd
+    else {
+        unreachable!("index_cmd only handles Commands::Index")
+    };
     if let Some(path) = path {
-        let path = PathBuf::from(path);
-        let Some(root) = git::repo_root(&path) else {
+        let Some(root) = git::repo_root(Path::new(&path)) else {
             if !quiet {
                 ui::warn("not inside a git repository");
             }
             return Ok(());
         };
-        db::upsert_project(db, &root).await?;
+        db::upsert_project(db, &root)?;
         if !quiet {
-            println!("{} {}", "indexed".green().bold(), root.display());
+            ui::success(&format!("indexed {}", root.display()));
         }
         return Ok(());
     }
-
-    let local = db::scan(db).await?;
-    let remote = match github_auth::load_token()? {
-        Some(token) => {
-            let repos = GitHub::new(Some(token)).user_repos().await?;
-            for repo in &repos {
-                db::upsert_remote_project(db, &repo.full_name).await?;
-            }
-            repos.len()
-        }
-        None => {
-            if !quiet {
-                ui::warn(&format!(
-                    "remote indexing skipped; authenticate with {} first",
-                    "p github login".bold()
-                ));
-            }
-            0
-        }
-    };
-    if !quiet {
-        println!(
-            "{} {} local, {} remote",
-            "indexed".green().bold(),
-            local,
-            remote
-        );
+    if watch {
+        let interval = interval
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| config::load().sync_interval());
+        return sync::watch(db, interval).await;
+    }
+    match sync::run(db, !background).await? {
+        Some(synced) if !quiet => sync::report(&synced),
+        Some(_) => {}
+        None if !quiet => ui::info("a sync is already running in the background"),
+        None => {}
     }
     Ok(())
 }

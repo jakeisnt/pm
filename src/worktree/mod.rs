@@ -895,6 +895,14 @@ fn merge(opts: MergeArgs) -> Result<()> {
         );
     }
 
+    // Only empty commits (or ones that cancel out): nothing to merge.
+    if git::succeeds(&wt.path, &["diff", "--quiet", &target, "HEAD"]) {
+        bail!(
+            "{branch} has no changes compared to {target}; remove it with {}",
+            "p worktree remove".bold()
+        );
+    }
+
     // Rebase onto the target so the merge is a fast-forward.
     if !git::is_ancestor(&wt.path, &target, "HEAD") {
         progress(&format!(
@@ -916,8 +924,13 @@ fn merge(opts: MergeArgs) -> Result<()> {
             None => squash_message(&wt.path, &target, &branch)?,
         };
         progress(&format!("Squashing {count} commits"));
+        let original = git::output(&wt.path, &["rev-parse", "HEAD"])?;
         git::output(&wt.path, &["reset", "--soft", &target])?;
-        git::output(&wt.path, &["commit", "--quiet", "-m", &message])?;
+        if let Err(e) = git::output(&wt.path, &["commit", "--quiet", "-m", &message]) {
+            // e.g. a pre-commit hook said no: put the branch back as it was.
+            git::output(&wt.path, &["reset", "--soft", &original])?;
+            return Err(e.context(format!("squash failed; {branch} is unchanged")));
+        }
     }
 
     let target_wt = repo.for_branch(&target).cloned();

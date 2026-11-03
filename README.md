@@ -112,24 +112,43 @@ p hook-install fish
 # Print the hook without installing it
 p hook zsh
 
-# Force a full reindex of configured local roots and accessible GitHub remotes
+# Sync the index now: local roots plus accessible GitHub repos (normally automatic)
 p index
+
+# Or keep a sync worker running (e.g. under launchd/systemd or in a tmux pane)
+p index --watch --interval 300
 
 # Index one git repository manually (used by shell hooks)
 p index /path/to/repo
 
-# Manage config.json
+# Manage config.json (values that parse as JSON are stored as JSON)
 p config list
 p config set searchDepth 3
+p config set searchRoots '["~/Documents", "~/code"]'
 p config delete searchDepth
 ```
 
 ## Configuration
 
-`config.json` in the current checkout supports:
+`config.json` lives in the platform config directory: `~/.config/pm/config.json` on Linux and `~/Library/Application Support/pm/config.json` on macOS. If that file doesn't exist, a `config.json` in the current directory is used, as before. Keys:
 
-- `searchRoots`: array of directories to scan for Git repositories
-- `searchDepth`: recursion depth for project discovery
+- `searchRoots`: directories to scan for Git repositories (default `["~/Documents"]`; `~` is expanded)
+- `searchDepth`: how many levels below each root to search (default `2`)
+- `syncInterval`: seconds before the index counts as stale and a background sync starts (default `300`)
+
+See [`config.json`](config.json) for an example with every key at its default.
+
+### Background sync
+
+Commands only read the SQLite index, so they return in milliseconds no matter how many repositories you have. When the index is older than `syncInterval`, a command starts a detached `p index` worker and carries on with what's already indexed. A lock ensures only one worker runs at a time. On a brand-new index, the first command scans local roots inline so it has something to show. A name that isn't in the index triggers a quick local rescan before `p` falls back to GitHub, so a repository you just cloned is found right away.
+
+GitHub is treated as unreliable:
+
+- Every request has a timeout, and reads are retried with backoff on network errors, 5xx responses and rate limits. Creating or renaming a repository is never retried automatically, since that could act twice.
+- A failed GitHub sync never undoes the local sync or drops repositories indexed earlier. Repeated failures back off (5 minutes, doubling up to an hour); `p index` always retries right away.
+- `p owner/repo` clones with plain git when the API is down.
+
+Set `PM_NO_BACKGROUND_SYNC=1` to disable the automatic worker (for scripts and tests), and `PM_GITHUB_API_URL` to point at GitHub Enterprise.
 
 Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
 
@@ -154,7 +173,7 @@ To change the shell's directory, `switch`, `merge` and `remove` rely on the shel
 
 ### Shell hook
 
-`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. The hook also defines a small `p` wrapper function so `p worktree` commands can `cd` your shell into the destination worktree. `p index <repo-path>` records that local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too. Running `p index` without a path forces a full reindex of configured local roots plus GitHub repositories accessible to your authenticated account.
+`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. The hook also defines a small `p` wrapper function so `p worktree` commands can `cd` your shell into the destination worktree. `p index <repo-path>` records that local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too. Running `p index` without a path syncs configured local roots plus GitHub repositories accessible to your authenticated account (see [Background sync](#background-sync)).
 
 ## License
 

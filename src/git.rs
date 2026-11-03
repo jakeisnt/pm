@@ -17,11 +17,19 @@ fn command(cwd: &Path, args: &[&str]) -> Command {
 pub fn output(cwd: &Path, args: &[&str]) -> Result<String> {
     let output = command(cwd, args).output().context("failed to run git")?;
     if !output.status.success() {
+        // Some failures (e.g. "nothing to commit") only explain themselves on stdout.
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let why = if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        };
         bail!(
             "git {} failed in {}: {}",
             args.first().copied().unwrap_or_default(),
             cwd.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
+            why.trim()
         );
     }
     Ok(String::from_utf8(output.stdout)?.trim_end().to_string())

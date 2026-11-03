@@ -87,12 +87,25 @@ pub enum Commands {
         #[arg(value_enum)]
         shell: Option<Shell>,
     },
-    /// Force reindexing of local roots and GitHub remotes, or index one git repository path.
+    /// Sync the project index with local roots and GitHub, or index one repository path.
+    ///
+    /// Other commands only read the index; they start this in the background
+    /// when the index is older than `syncInterval`.
     Index {
         /// Optional repository path to index; when omitted, all configured local roots and GitHub remotes are indexed.
         path: Option<String>,
         #[arg(short, long)]
         quiet: bool,
+        /// Keep running as a background worker, syncing every --interval seconds.
+        #[arg(long, conflicts_with = "path")]
+        watch: bool,
+        /// Seconds between syncs with --watch (default: syncInterval, 300).
+        #[arg(long, requires = "watch")]
+        interval: Option<u64>,
+        /// Set by the automatically started worker: be patient with GitHub
+        /// and respect the failure backoff.
+        #[arg(long, hide = true, conflicts_with = "path")]
+        background: bool,
     },
     /// Manage git worktrees (worktrunk-style); `p wt` with no subcommand lists them.
     #[command(alias = "wt")]
