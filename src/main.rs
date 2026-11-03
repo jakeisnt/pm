@@ -46,8 +46,8 @@ async fn run() -> Result<()> {
         return Ok(());
     }
 
-    if let Some(Commands::Worktree { command }) = cli.command {
-        return worktree::run(command);
+    if let Some(Commands::Worktree { project, command }) = cli.command {
+        return worktree_cmd(project, command).await;
     }
 
     let pool = db::connect().await?;
@@ -141,6 +141,46 @@ async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
         spawn_shell_in(&p.path)?;
     }
     Ok(())
+}
+
+/// Run a worktree command in the named project, or in the project that
+/// contains the current directory.
+async fn worktree_cmd(project: Option<String>, command: Option<cli::WorktreeCmd>) -> Result<()> {
+    match project {
+        Some(name) => {
+            let db = db::connect().await?;
+            db::migrate(&db).await?;
+            let project = match db::find_project(&db, &name).await? {
+                Some(p) => ensure_local_project(&db, p).await?,
+                None => match maybe_clone_github_repo(&db, &name).await? {
+                    Some(p) => p,
+                    None if io::stdin().is_terminal() => {
+                        eprintln!(
+                            "{} no project found for {}",
+                            "warning:".yellow().bold(),
+                            name.bold()
+                        );
+                        let Some(p) = choose(db::projects(&db).await?, Some(&name))? else {
+                            return Ok(());
+                        };
+                        ensure_local_project(&db, p).await?
+                    }
+                    None => bail!("no project found for {name}"),
+                },
+            };
+            env::set_current_dir(&project.path)
+                .with_context(|| format!("cannot enter {}", project.path))?;
+        }
+        None => {
+            if db::git_repo_root(&env::current_dir()?)?.is_none() {
+                bail!(
+                    "not inside a project; pass {} or cd into one",
+                    "--project <name>".bold()
+                );
+            }
+        }
+    }
+    worktree::run(command)
 }
 
 async fn ensure_local_project(db: &SqlitePool, project: Project) -> Result<Project> {
@@ -416,11 +456,45 @@ fn style_scope(scope: &str) -> colored::ColoredString {
     scope.bold().color(Color::BrightCyan)
 }
 
-fn style_name(name: &str) -> colored::ColoredString {
+/// Fuzzy-pick one tab-separated line. The first two columns are shown and
+/// searched; the rest (e.g. an id) only come back in the returned line.
+pub(crate) fn fuzzy_select(
+    prompt: &str,
+    input: &str,
+    initial_query: Option<&str>,
+) -> Result<Option<String>> {
+    let mut options_builder = SkimOptionsBuilder::default();
+    options_builder
+        .prompt(format!("{} ", prompt.bright_cyan().bold()))
+        .height("80%")
+        .reverse(true)
+        .border(BorderType::Rounded)
+        .with_nth(vec!["1".to_string(), "2".to_string()])
+        .delimiter(Regex::new("\t").context("failed to configure selector delimiter")?);
+    if let Some(query) = initial_query {
+        options_builder.query(query.to_string());
+    }
+    let options = options_builder
+        .build()
+        .context("failed to configure selector")?;
+    let item_reader = SkimItemReader::new(SkimItemReaderOption::default().ansi(true));
+    let items = item_reader.of_bufread(Cursor::new(input.to_string()));
+    let output = Skim::run_with(options, Some(items))
+        .map_err(|err| anyhow::anyhow!("failed to run selector: {err}"))?;
+    if output.is_abort {
+        return Ok(None);
+    }
+    Ok(output
+        .selected_items
+        .first()
+        .map(|item| item.output().to_string()))
+}
+
+pub(crate) fn style_name(name: &str) -> colored::ColoredString {
     name.bold().color(Color::BrightGreen)
 }
 
-fn style_path(path: &str) -> colored::ColoredString {
+pub(crate) fn style_path(path: &str) -> colored::ColoredString {
     path.dimmed()
 }
 
@@ -435,31 +509,9 @@ fn choose(ps: Vec<Project>, initial_query: Option<&str>) -> Result<Option<Projec
         .collect::<Vec<_>>()
         .join("\n");
 
-    let mut options_builder = SkimOptionsBuilder::default();
-    options_builder
-        .prompt(format!("{} ", "Select project>".bright_cyan().bold()))
-        .height("80%")
-        .reverse(true)
-        .border(BorderType::Rounded)
-        .with_nth(vec!["1".to_string(), "2".to_string()])
-        .delimiter(Regex::new("\t").context("failed to configure project selector delimiter")?);
-    if let Some(query) = initial_query {
-        options_builder.query(query.to_string());
-    }
-    let options = options_builder
-        .build()
-        .context("failed to configure project selector")?;
-    let item_reader = SkimItemReader::new(SkimItemReaderOption::default().ansi(true));
-    let items = item_reader.of_bufread(Cursor::new(input));
-    let output = Skim::run_with(options, Some(items))
-        .map_err(|err| anyhow::anyhow!("failed to run project selector: {err}"))?;
-    if output.is_abort {
-        return Ok(None);
-    }
-    let Some(selected) = output.selected_items.first() else {
+    let Some(selected_output) = fuzzy_select("Select project>", &input, initial_query)? else {
         return Ok(None);
     };
-    let selected_output = selected.output();
     let id = selected_output
         .rsplit('\t')
         .next()

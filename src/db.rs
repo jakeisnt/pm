@@ -1,7 +1,10 @@
 use crate::{config, project::Project};
 use anyhow::{Context, Result};
 use directories::BaseDirs;
-use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{
+    Row, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -16,10 +19,12 @@ pub async fn connect() -> Result<SqlitePool> {
         .data_dir()
         .join("pm");
     fs::create_dir_all(&dir)?;
-    let url = format!("sqlite://{}", dir.join("pm.db").display());
+    let options = SqliteConnectOptions::new()
+        .filename(dir.join("pm.db"))
+        .create_if_missing(true);
     Ok(SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&url)
+        .connect_with(options)
         .await?)
 }
 

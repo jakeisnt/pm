@@ -8,15 +8,14 @@
 //! - `.config/wt.toml`: project hooks (`pre-start`, `post-start`, `pre-merge`, ...)
 
 use crate::cli::WorktreeCmd;
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use regex::Regex;
 use serde::Serialize;
-use skim::{prelude::*, tui::BorderType};
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{self, BufRead, Cursor, IsTerminal, Write},
+    io::{self, BufRead, IsTerminal, Write},
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{SystemTime, UNIX_EPOCH},
@@ -650,8 +649,23 @@ struct SwitchOpts {
 fn switch(opts: SwitchOpts) -> Result<()> {
     let repo = Repo::discover()?;
     let branch = match &opts.branch {
-        Some(name) => repo.resolve_name(name)?,
-        None => match pick(&repo)? {
+        Some(name) => {
+            let branch = repo.resolve_name(name)?;
+            let known = repo.for_branch(&branch).is_some()
+                || branch_exists(&repo.primary.path, &branch)
+                || remote_branch_exists(&repo.primary.path, &branch);
+            if known || opts.create || !io::stdin().is_terminal() {
+                branch
+            } else {
+                // Same as `p <name>`: no exact match opens the picker prefilled.
+                warn(&format!("no worktree or branch for {}", branch.bold()));
+                match pick(&repo, Some(name))? {
+                    Some(branch) => branch,
+                    None => return Ok(()),
+                }
+            }
+        }
+        None => match pick(&repo, None)? {
             Some(branch) => branch,
             None => return Ok(()),
         },
@@ -794,7 +808,9 @@ fn switch(opts: SwitchOpts) -> Result<()> {
     Ok(())
 }
 
-fn pick(repo: &Repo) -> Result<Option<String>> {
+/// Fuzzy-find a worktree (or a branch without one) in this project, styled
+/// like the project picker. Returns the chosen branch.
+fn pick(repo: &Repo, query: Option<&str>) -> Result<Option<String>> {
     if !io::stdin().is_terminal() {
         bail!("no branch given; pass a branch name or run interactively");
     }
@@ -809,10 +825,10 @@ fn pick(repo: &Repo) -> Result<Option<String>> {
             " "
         };
         lines.push(format!(
-            "{branch}\t{} {}\t{}",
+            "{} {}\t{}\t{branch}",
             marker.bright_magenta(),
-            branch.bright_cyan().bold(),
-            tildify(&wt.path).dimmed()
+            crate::style_name(branch),
+            crate::style_path(&tildify(&wt.path))
         ));
     }
     let branches = git(
@@ -821,32 +837,14 @@ fn pick(repo: &Repo) -> Result<Option<String>> {
     )?;
     for branch in branches.lines().filter(|b| repo.for_branch(b).is_none()) {
         lines.push(format!(
-            "{branch}\t{} {}\t{}",
+            "{} {branch}\t{}\t{branch}",
             "/".dimmed(),
-            branch,
             "(no worktree)".dimmed()
         ));
     }
-    let options = SkimOptionsBuilder::default()
-        .prompt(format!("{} ", "Switch worktree>".bright_cyan().bold()))
-        .height("60%")
-        .reverse(true)
-        .border(BorderType::Rounded)
-        .with_nth(vec!["2".to_string(), "3".to_string()])
-        .delimiter(Regex::new("\t")?)
-        .build()
-        .context("failed to configure worktree selector")?;
-    let reader = SkimItemReader::new(SkimItemReaderOption::default().ansi(true));
-    let items = reader.of_bufread(Cursor::new(lines.join("\n")));
-    let output = Skim::run_with(options, Some(items))
-        .map_err(|err| anyhow!("failed to run worktree selector: {err}"))?;
-    if output.is_abort {
-        return Ok(None);
-    }
-    Ok(output.selected_items.first().map(|item| {
-        let text = item.output().to_string();
-        text.split('\t').next().unwrap_or_default().to_string()
-    }))
+    let prompt = format!("Select worktree ({})>", repo.name());
+    Ok(crate::fuzzy_select(&prompt, &lines.join("\n"), query)?
+        .and_then(|line| line.rsplit('\t').next().map(str::to_string)))
 }
 
 // ---------------------------------------------------------------------------

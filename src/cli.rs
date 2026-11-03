@@ -97,6 +97,10 @@ pub enum Commands {
     /// Manage git worktrees (worktrunk-style); `p wt` with no subcommand lists them.
     #[command(alias = "wt")]
     Worktree {
+        /// Project whose worktrees to manage (same lookup as `p <name>`).
+        /// Defaults to the project containing the current directory.
+        #[arg(short = 'P', long, global = true)]
+        project: Option<String>,
         #[command(subcommand)]
         command: Option<WorktreeCmd>,
     },
@@ -142,7 +146,8 @@ pub enum WorktreeCmd {
     /// Switch to a branch's worktree, creating the worktree if needed.
     ///
     /// Accepts a branch name, a worktree path, `^` (default branch), `@`
-    /// (current) or `-` (previous). With no branch, opens a fuzzy picker.
+    /// (current) or `-` (previous). With no branch, or one that doesn't
+    /// exist, fuzzy-finds the project's worktrees and branches.
     /// With the shell integration from `p hook-install` the shell changes
     /// directory; otherwise a subshell opens in the worktree.
     #[command(visible_aliases = ["sw", "s"])]
@@ -248,13 +253,28 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Worktree {
+                project: None,
                 command: Some(WorktreeCmd::Switch { branch: Some(b), create: true, execute: Some(x), args, .. })
             }) if b == "feat" && x == "claude" && args == ["go"]
         ));
         let cli = Cli::try_parse_from(["p", "worktree"]).expect("parse bare worktree");
         assert!(matches!(
             cli.command,
-            Some(Commands::Worktree { command: None })
+            Some(Commands::Worktree {
+                project: None,
+                command: None
+            })
         ));
+        for argv in [
+            &["p", "wt", "-P", "pm", "sw"][..],
+            &["p", "wt", "sw", "--project", "pm"][..],
+        ] {
+            let cli = Cli::try_parse_from(argv).expect("parse --project");
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Worktree { project: Some(p), command: Some(WorktreeCmd::Switch { branch: None, .. }) })
+                    if p == "pm"
+            ));
+        }
     }
 }
