@@ -5,11 +5,7 @@ use sqlx::{
     Row, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{fs, path::Path};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -58,9 +54,9 @@ pub async fn rollback_transaction(db: &SqlitePool) -> Result<()> {
 }
 
 pub async fn upsert_project(db: &SqlitePool, path: &Path) -> Result<()> {
-    let path = git_repo_root(path)?.unwrap_or_else(|| path.to_path_buf());
+    let path = crate::git::repo_root(path).unwrap_or_else(|| path.to_path_buf());
     let name = path.file_name().unwrap().to_string_lossy();
-    let remote = github_full_name(&path);
+    let remote = crate::git::github_full_name(&path);
     let owner = github_owner(remote.as_deref());
     let path = path.to_string_lossy().to_string();
     let t = now();
@@ -123,64 +119,6 @@ pub async fn upsert_remote_project(db: &SqlitePool, full_name: &str) -> Result<(
         .execute(db)
         .await?;
     Ok(())
-}
-
-pub fn git_repo_root(path: &Path) -> Result<Option<PathBuf>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["rev-parse", "--show-toplevel"])
-        .output();
-    let Ok(output) = output else {
-        return Ok(None);
-    };
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let root =
-        String::from_utf8(output.stdout).context("git returned a non-UTF-8 repository path")?;
-    let root = root.trim();
-    if root.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(PathBuf::from(root)))
-    }
-}
-
-fn github_full_name(path: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(path)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let url = String::from_utf8(output.stdout).ok()?;
-    parse_github_remote(url.trim())
-}
-
-fn parse_github_remote(url: &str) -> Option<String> {
-    let path = if let Some(rest) = url.strip_prefix("git@github.com:") {
-        rest
-    } else if let Some(rest) = url.strip_prefix("https://github.com/") {
-        rest
-    } else if let Some(rest) = url.strip_prefix("http://github.com/") {
-        rest
-    } else if let Some(rest) = url.strip_prefix("ssh://git@github.com/") {
-        rest
-    } else {
-        return None;
-    };
-    let path = path.split(['?', '#']).next()?.trim_end_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let (owner, repo) = path.split_once('/')?;
-    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
-        None
-    } else {
-        Some(format!("{owner}/{repo}"))
-    }
 }
 
 pub async fn mark_project_remote_only(db: &SqlitePool, id: &str, full_name: &str) -> Result<()> {

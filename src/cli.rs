@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -151,82 +151,93 @@ pub enum WorktreeCmd {
     /// With the shell integration from `p hook-install` the shell changes
     /// directory; otherwise a subshell opens in the worktree.
     #[command(visible_aliases = ["sw", "s"])]
-    Switch {
-        branch: Option<String>,
-        /// Create a new branch (from --base, default: the default branch).
-        #[arg(short, long)]
-        create: bool,
-        /// Base branch for --create.
-        #[arg(short, long)]
-        base: Option<String>,
-        /// Command to run in the worktree after switching, e.g. `-x claude`.
-        #[arg(short = 'x', long)]
-        execute: Option<String>,
-        /// Print the worktree path instead of switching to it.
-        #[arg(short, long)]
-        print_path: bool,
-        /// Approve project hooks from .config/wt.toml without prompting.
-        #[arg(short, long)]
-        yes: bool,
-        /// Skip hooks.
-        #[arg(long)]
-        no_hooks: bool,
-        /// Arguments passed to the --execute command.
-        #[arg(last = true)]
-        args: Vec<String>,
-    },
+    Switch(SwitchArgs),
     /// List worktrees with status, ahead/behind counts and last commit.
     #[command(visible_alias = "ls")]
-    List {
-        #[arg(long)]
-        json: bool,
-        /// Also show local branches that have no worktree.
-        #[arg(long)]
-        branches: bool,
-    },
+    List(ListArgs),
     /// Remove worktrees (default: the current one) and their merged branches.
     #[command(visible_alias = "rm")]
-    Remove {
-        branches: Vec<String>,
-        /// Remove even when the worktree has uncommitted changes.
-        #[arg(short, long)]
-        force: bool,
-        /// Delete the branch even when it isn't merged.
-        #[arg(short = 'D', long)]
-        force_delete: bool,
-        /// Keep the branch.
-        #[arg(long)]
-        no_delete_branch: bool,
-        /// Approve project hooks from .config/wt.toml without prompting.
-        #[arg(short, long)]
-        yes: bool,
-        /// Skip hooks.
-        #[arg(long)]
-        no_hooks: bool,
-    },
+    Remove(RemoveArgs),
     /// Squash, rebase and fast-forward the current branch into the target
     /// (default: the default branch), then remove the worktree.
-    Merge {
-        target: Option<String>,
-        /// Keep individual commits instead of squashing.
-        #[arg(long)]
-        no_squash: bool,
-        /// Keep the worktree and branch after merging.
-        #[arg(long)]
-        no_remove: bool,
-        /// Commit message for the squashed commit.
-        #[arg(short, long)]
-        message: Option<String>,
-        /// Approve project hooks from .config/wt.toml without prompting.
-        #[arg(short, long)]
-        yes: bool,
-        /// Skip hooks.
-        #[arg(long)]
-        no_hooks: bool,
-    },
+    Merge(MergeArgs),
     /// Move a linked worktree's branch (and its changes) onto the primary checkout.
     #[command(alias = "co")]
     Checkout { branch_name: String },
+}
+
+/// Hook options shared by every worktree command that runs hooks.
+#[derive(Args, Clone, Copy, Default)]
+pub struct HookArgs {
+    /// Approve project hooks from .config/wt.toml without prompting.
+    #[arg(short, long)]
+    pub yes: bool,
+    /// Skip hooks.
+    #[arg(long)]
+    pub no_hooks: bool,
+}
+
+#[derive(Args)]
+pub struct SwitchArgs {
+    pub branch: Option<String>,
+    /// Create a new branch (from --base, default: the default branch).
+    #[arg(short, long)]
+    pub create: bool,
+    /// Base branch for --create.
+    #[arg(short, long)]
+    pub base: Option<String>,
+    /// Command to run in the worktree after switching, e.g. `-x claude`.
+    #[arg(short = 'x', long)]
+    pub execute: Option<String>,
+    /// Print the worktree path instead of switching to it.
+    #[arg(short, long)]
+    pub print_path: bool,
+    #[command(flatten)]
+    pub hooks: HookArgs,
+    /// Arguments passed to the --execute command.
+    #[arg(last = true)]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Default)]
+pub struct ListArgs {
+    #[arg(long)]
+    pub json: bool,
+    /// Also show local branches that have no worktree.
+    #[arg(long)]
+    pub branches: bool,
+}
+
+#[derive(Args)]
+pub struct RemoveArgs {
+    pub branches: Vec<String>,
+    /// Remove even when the worktree has uncommitted changes.
+    #[arg(short, long)]
+    pub force: bool,
+    /// Delete the branch even when it isn't merged.
+    #[arg(short = 'D', long)]
+    pub force_delete: bool,
+    /// Keep the branch.
+    #[arg(long)]
+    pub no_delete_branch: bool,
+    #[command(flatten)]
+    pub hooks: HookArgs,
+}
+
+#[derive(Args)]
+pub struct MergeArgs {
+    pub target: Option<String>,
+    /// Keep individual commits instead of squashing.
+    #[arg(long)]
+    pub no_squash: bool,
+    /// Keep the worktree and branch after merging.
+    #[arg(long)]
+    pub no_remove: bool,
+    /// Commit message for the squashed commit.
+    #[arg(short, long)]
+    pub message: Option<String>,
+    #[command(flatten)]
+    pub hooks: HookArgs,
 }
 
 #[cfg(test)]
@@ -254,7 +265,7 @@ mod tests {
             cli.command,
             Some(Commands::Worktree {
                 project: None,
-                command: Some(WorktreeCmd::Switch { branch: Some(b), create: true, execute: Some(x), args, .. })
+                command: Some(WorktreeCmd::Switch(SwitchArgs { branch: Some(b), create: true, execute: Some(x), args, .. }))
             }) if b == "feat" && x == "claude" && args == ["go"]
         ));
         let cli = Cli::try_parse_from(["p", "worktree"]).expect("parse bare worktree");
@@ -272,7 +283,7 @@ mod tests {
             let cli = Cli::try_parse_from(argv).expect("parse --project");
             assert!(matches!(
                 cli.command,
-                Some(Commands::Worktree { project: Some(p), command: Some(WorktreeCmd::Switch { branch: None, .. }) })
+                Some(Commands::Worktree { project: Some(p), command: Some(WorktreeCmd::Switch(SwitchArgs { branch: None, .. })) })
                     if p == "pm"
             ));
         }

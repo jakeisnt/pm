@@ -17,7 +17,6 @@ colored = "3.0.0"
 crossterm = "0.29.0"
 directories = "6.0.0"
 fuzzy-matcher = "0.3.7"
-octocrab = "0.48.0"
 regex = "1.12.3"
 reqwest = { version = "0.12.24", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }

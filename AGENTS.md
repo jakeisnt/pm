@@ -16,7 +16,15 @@ Rust is pinned in `rust-toolchain.toml`; do not change the toolchain casually.
 
 ## Structure
 
-- `src/main.rs` — CLI entry point and implementation
+- `src/main.rs` — entry point and project commands
+- `src/cli.rs` — clap definitions
+- `src/project.rs` — `Project`, name → local checkout resolution, project picker
+- `src/db.rs` — SQLite project index
+- `src/git.rs` — the only place that shells out to git
+- `src/github.rs` — GitHub REST client; `src/github_auth.rs` — token storage and login
+- `src/ui.rs` — fuzzy picker, prompts, styling, status lines
+- `src/shell.rs` — shell hooks installed by `p hook-install`
+- `src/worktree/` — `p worktree` commands; `hooks.rs` (worktrunk config/hooks), `template.rs`
 - `migrations/` — historical SQLite schema files for compatibility/reference
 - `web/` — standalone static promo site for Cloudflare Pages; keep it build-free unless requested
 - `config.json` — local/default configuration

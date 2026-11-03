@@ -82,7 +82,8 @@ p wt                          # list worktrees with status
 p wt switch feat              # switch to feat's worktree, creating it if the branch exists
 p wt sw -c feat               # create branch + worktree from the default branch
 p wt sw -c feat -x claude -- 'Fix the pagination bug'   # create, then start an agent there
-p wt sw                       # fuzzy-pick a worktree or branch
+p wt sw                       # fuzzy-pick a worktree or branch in this project
+p wt -P pm sw                 # ...in another project (same lookup as `p pm`)
 p wt sw ^                     # default branch; `-` = previous worktree
 p wt merge                    # squash, rebase, fast-forward into main, remove worktree
 p wt rm                       # remove the current worktree (and its branch, if merged)
@@ -136,7 +137,9 @@ Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`)
 
 `p worktree` (alias `p wt`) is modelled on [worktrunk](https://worktrunk.dev): worktrees are addressed by branch name and their paths come from a template.
 
-- `switch` (`sw`, `s`) goes to the branch's worktree, creating one when the branch exists locally or on `origin`. `--create` makes a new branch from `--base` (default: the repo's default branch). `-x <cmd>` runs a command in the worktree (arguments after `--` are passed to it). `-p` prints the path instead.
+Worktree commands act on the project containing the current directory. From anywhere else, pass `-P/--project <name>`, which is resolved like `p <name>`: a name that matches nothing opens the project picker.
+
+- `switch` (`sw`, `s`) goes to the branch's worktree, creating one when the branch exists locally or on `origin`. `--create` makes a new branch from `--base` (default: the repo's default branch). `-x <cmd>` runs a command in the worktree (arguments after `--` are passed to it). `-p` prints the path instead. With no branch, or one that matches nothing, it opens a fuzzy picker of the project's worktrees and branches.
 - `list` (`ls`) shows `@` current / `^` primary, status (`+` staged, `!` modified, `?` untracked), uncommitted line counts, `↑`/`↓` vs the default branch, `⇡`/`⇣` vs upstream, and the last commit. `--branches` includes branches without a worktree; `--json` for scripting.
 - `merge [target]` requires a clean worktree, rebases onto the target, squashes multiple commits (`--no-squash` to keep them, `-m` for the message), fast-forwards the target, then removes the worktree and branch (`--no-remove` to keep them).
 - `remove` (`rm`) removes the current (or named) worktree and deletes its branch when it is already merged into the default branch. `-f` removes dirty worktrees; `-D` deletes unmerged branches.
