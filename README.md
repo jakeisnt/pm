@@ -77,6 +77,17 @@ p remove /path/to/project --force
 p rename <old-name> <new-name>
 p r <old-name> <new-name>
 
+# Worktrees (worktrunk-style; `p wt` is short for `p worktree`)
+p wt                          # list worktrees with status
+p wt switch feat              # switch to feat's worktree, creating it if the branch exists
+p wt sw -c feat               # create branch + worktree from the default branch
+p wt sw -c feat -x claude -- 'Fix the pagination bug'   # create, then start an agent there
+p wt sw                       # fuzzy-pick a worktree or branch in this project
+p wt -P pm sw                 # ...in another project (same lookup as `p pm`)
+p wt sw ^                     # default branch; `-` = previous worktree
+p wt merge                    # squash, rebase, fast-forward into main, remove worktree
+p wt rm                       # remove the current worktree (and its branch, if merged)
+
 # Move a linked worktree branch back onto the primary checkout
 p worktree checkout <branch-name>
 p worktree co <branch-name>
@@ -101,28 +112,68 @@ p hook-install fish
 # Print the hook without installing it
 p hook zsh
 
-# Force a full reindex of configured local roots and accessible GitHub remotes
+# Sync the index now: local roots plus accessible GitHub repos (normally automatic)
 p index
+
+# Or keep a sync worker running (e.g. under launchd/systemd or in a tmux pane)
+p index --watch --interval 300
 
 # Index one git repository manually (used by shell hooks)
 p index /path/to/repo
 
-# Manage config.json
+# Manage config.json (values that parse as JSON are stored as JSON)
 p config list
 p config set searchDepth 3
+p config set searchRoots '["~/Documents", "~/code"]'
 p config delete searchDepth
 ```
 
 ## Configuration
 
-`config.json` in the current checkout supports:
+`config.json` lives in the platform config directory: `~/.config/pm/config.json` on Linux and `~/Library/Application Support/pm/config.json` on macOS. If that file doesn't exist, a `config.json` in the current directory is used, as before. Keys:
 
-- `searchRoots`: array of directories to scan for Git repositories
-- `searchDepth`: recursion depth for project discovery
+- `searchRoots`: directories to scan for Git repositories (default `["~/Documents"]`; `~` is expanded)
+- `searchDepth`: how many levels below each root to search (default `2`)
+- `syncInterval`: seconds before the index counts as stale and a background sync starts (default `300`)
+
+See [`config.json`](config.json) for an example with every key at its default.
+
+### Background sync
+
+Commands only read the SQLite index, so they return in milliseconds no matter how many repositories you have. When the index is older than `syncInterval`, a command starts a detached `p index` worker and carries on with what's already indexed. A lock ensures only one worker runs at a time. On a brand-new index, the first command scans local roots inline so it has something to show. A name that isn't in the index triggers a quick local rescan before `p` falls back to GitHub, so a repository you just cloned is found right away.
+
+GitHub is treated as unreliable:
+
+- Every request has a timeout, and reads are retried with backoff on network errors, 5xx responses and rate limits. Creating or renaming a repository is never retried automatically, since that could act twice.
+- A failed GitHub sync never undoes the local sync or drops repositories indexed earlier. Repeated failures back off (5 minutes, doubling up to an hour); `p index` always retries right away.
+- `p owner/repo` clones with plain git when the API is down.
+
+Set `PM_NO_BACKGROUND_SYNC=1` to disable the automatic worker (for scripts and tests), and `PM_GITHUB_API_URL` to point at GitHub Enterprise.
 
 Runtime state is stored in SQLite under the platform data directory (`pm/pm.db`). GitHub OAuth tokens are stored separately in the platform config directory (`pm/github-token`) with user-only permissions on Unix.
 
-`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. `p index <repo-path>` records that local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too. Running `p index` without a path forces a full reindex of configured local roots plus GitHub repositories accessible to your authenticated account.
+### Worktrees
+
+`p worktree` (alias `p wt`) is modelled on [worktrunk](https://worktrunk.dev): worktrees are addressed by branch name and their paths come from a template.
+
+Worktree commands act on the project containing the current directory. From anywhere else, pass `-P/--project <name>`, which is resolved like `p <name>`: a name that matches nothing opens the project picker.
+
+- `switch` (`sw`, `s`) goes to the branch's worktree, creating one when the branch exists locally or on `origin`. `--create` makes a new branch from `--base` (default: the repo's default branch). `-x <cmd>` runs a command in the worktree (arguments after `--` are passed to it). `-p` prints the path instead. With no branch, or one that matches nothing, it opens a fuzzy picker of the project's worktrees and branches.
+- `list` (`ls`) shows `@` current / `^` primary, status (`+` staged, `!` modified, `?` untracked), uncommitted line counts, `↑`/`↓` vs the default branch, `⇡`/`⇣` vs upstream, and the last commit. `--branches` includes branches without a worktree; `--json` for scripting.
+- `merge [target]` requires a clean worktree, rebases onto the target, squashes multiple commits (`--no-squash` to keep them, `-m` for the message), fast-forwards the target, then removes the worktree and branch (`--no-remove` to keep them).
+- `remove` (`rm`) removes the current (or named) worktree and deletes its branch when it is already merged into the default branch. `-f` removes dirty worktrees; `-D` deletes unmerged branches.
+
+**worktrunk compatibility.** `p` reads worktrunk's own config, so repos already set up for `wt` work unchanged:
+
+- `worktree-path` in `~/.config/worktrunk/config.toml` (default `{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}`, giving `~/code/repo.feature-x`).
+- Hooks from `.config/wt.toml` (project) and the user config, in any of worktrunk's string / table / `[[pipeline]]` forms: `pre-start` (also `post-create`), `post-start`, `post-switch`, `pre-merge`, `post-merge`, `pre-remove`, `post-remove`. `pre-*` hooks block and abort on failure; `post-*` hooks run in the background and log to `.git/pm-logs/`. Project hooks need approval the first time (`--yes` to approve without prompting); approvals are saved in the repo's local git config.
+- Templates support worktrunk's common variables (`branch`, `worktree_path`, `worktree_name`, `repo`, `repo_path`, `default_branch`, `base`, `target`, `commit`, ...) and the filters `sanitize`, `basename`, `dirname`, `hash_port`, `lower` and `upper`. `{% ... %}` blocks are not supported. `hash_port` yields a stable port in 10000–19999, but not the same number worktrunk would pick.
+
+To change the shell's directory, `switch`, `merge` and `remove` rely on the shell integration installed by `p hook-install`. Without it, `switch` opens a subshell in the worktree, the same way `p <project>` does.
+
+### Shell hook
+
+`p hook-install` installs an idempotent hook block in your shell startup file (`.zshrc`, `.bashrc`, or `~/.config/fish/conf.d/p.fish`). The hook wraps `git` and only runs after successful repository-creating commands such as `git init`, `git clone`, and `git worktree add`; it does not run on prompt or directory changes. When it runs, it calls `p index --quiet <repo-path>` in the background. The hook also defines a small `p` wrapper function so `p worktree` commands can `cd` your shell into the destination worktree. `p index <repo-path>` records that local repository and, when `origin` points at GitHub, stores the `owner/repo` remote in the index too. Running `p index` without a path syncs configured local roots plus GitHub repositories accessible to your authenticated account (see [Background sync](#background-sync)).
 
 ## License
 

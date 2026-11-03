@@ -40,6 +40,9 @@
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
 
+            # aws-lc-sys (rustls' crypto backend) builds C code with cmake.
+            nativeBuildInputs = [ pkgs.cmake ];
+
             meta = with nixpkgs.lib; {
               description = "A fast Rust project manager CLI";
               homepage = "https://github.com/jakeisnt/pm";

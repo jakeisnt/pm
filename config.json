@@ -1,4 +1,5 @@
 {
-  "onMissingCommand": "echo \"could not find command\"",
-  "onError": "echo \"error in $PM_REPO: $PM_ERROR\""
+  "searchRoots": ["~/Documents"],
+  "searchDepth": 2,
+  "syncInterval": 300
 }

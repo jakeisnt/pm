@@ -1,5 +1,18 @@
+//! Projects and how a name typed on the command line becomes a local checkout.
+
+use crate::{
+    db, git,
+    github::{self, GitHub},
+    github_auth, ui,
+};
+use anyhow::{Context, Result, bail};
+use colored::Colorize;
+use rusqlite::Connection;
 use serde::Serialize;
-use std::fmt;
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Project {
@@ -15,4 +28,165 @@ impl fmt::Display for Project {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:<28} {}", self.name, self.path)
     }
+}
+
+/// Find `name` in the index (or as `owner/repo` on GitHub) and make sure it is
+/// checked out locally, cloning after confirmation if needed.
+pub async fn resolve(db: &Connection, name: &str) -> Result<Option<Project>> {
+    let mut found = db::find_project(db, name)?;
+    if found.is_none() {
+        // A miss may just mean the index is behind (e.g. a fresh clone); a
+        // local rescan is cheap next to cloning from GitHub.
+        db::scan(db)?;
+        found = db::find_project(db, name)?;
+    }
+    match found {
+        Some(project) => ensure_local(db, project).await.map(Some),
+        None => clone_from_github(db, name).await,
+    }
+}
+
+/// Like [`resolve`], but fall back to the fuzzy picker (prefilled with `name`)
+/// when nothing matches. With no name, go straight to the picker.
+pub async fn resolve_or_pick(db: &Connection, name: Option<&str>) -> Result<Option<Project>> {
+    if let Some(name) = name {
+        if let Some(project) = resolve(db, name).await? {
+            return Ok(Some(project));
+        }
+        if !ui::can_prompt_interactively() {
+            bail!("no project found for {name}");
+        }
+        ui::warn(&format!("no project found for {}", name.bold()));
+    }
+    match pick(db::projects(db)?, name)? {
+        Some(project) => ensure_local(db, project).await.map(Some),
+        None => Ok(None),
+    }
+}
+
+/// Fuzzy-pick a project.
+pub fn pick(projects: Vec<Project>, query: Option<&str>) -> Result<Option<Project>> {
+    if projects.is_empty() {
+        bail!("no projects found")
+    }
+    let input = projects
+        .iter()
+        .map(|p| {
+            format!(
+                "{}\t{}\t{}",
+                ui::style_name(&p.name),
+                ui::style_path(&p.path),
+                p.id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let Some(line) = ui::fuzzy_select("Select project>", &input, query)? else {
+        return Ok(None);
+    };
+    let id = line.rsplit('\t').next().unwrap_or_default();
+    projects
+        .into_iter()
+        .find(|p| p.id == id)
+        .context("selected project no longer exists")
+        .map(Some)
+}
+
+async fn ensure_local(db: &Connection, project: Project) -> Result<Project> {
+    if let Some(name) = project.path.strip_prefix("github://") {
+        return clone_from_github(db, name)
+            .await?
+            .with_context(|| format!("{} is not available locally", project.path));
+    }
+    if Path::new(&project.path).exists() {
+        return Ok(project);
+    }
+    let full_name = project
+        .github_full_name
+        .clone()
+        .or_else(|| infer_github_full_name(&project.path));
+    let Some(full_name) = full_name else {
+        return Ok(project);
+    };
+    db::mark_project_remote_only(db, &project.id, &full_name)?;
+    clone_from_github(db, &full_name)
+        .await?
+        .with_context(|| format!("{full_name} is not available locally"))
+}
+
+/// `~/Documents/<owner>/<repo>` → `owner/repo`.
+fn infer_github_full_name(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    let repo = path.file_name()?.to_str()?;
+    let owner = path.parent()?.file_name()?.to_str()?;
+    Some(format!("{owner}/{repo}"))
+}
+
+/// Where `p` keeps GitHub checkouts.
+pub fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {
+    Ok(directories::BaseDirs::new()
+        .context("home dir unavailable")?
+        .home_dir()
+        .join("Documents")
+        .join(owner)
+        .join(repo))
+}
+
+/// Clone `owner/repo` into the standard path (after asking) and index it.
+/// Returns `None` for names that aren't `owner/repo` or when the user declines.
+async fn clone_from_github(db: &Connection, name: &str) -> Result<Option<Project>> {
+    let Some((owner, repo)) = name.split_once('/') else {
+        return Ok(None);
+    };
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return Ok(None);
+    }
+
+    let github = GitHub::new(github_auth::token_or_login()?);
+    let info = match github.repo(name).await {
+        Ok(info) => info,
+        // The API is only a courtesy check; git can clone without it.
+        Err(e) if github::is_unavailable(&e) => {
+            ui::warn(&format!("{e:#}; trying git directly"));
+            github::Repo {
+                full_name: name.to_string(),
+                clone_url: format!("https://github.com/{name}.git"),
+            }
+        }
+        Err(e) if github::is_not_found(&e) => {
+            let hint = if github.token().is_some() {
+                "check that your token has private-repository access and org SSO authorization"
+            } else {
+                "authenticate with `gh auth login` or `p github login` to access private repositories"
+            };
+            bail!("GitHub repository not found or inaccessible: {name}; {hint}");
+        }
+        Err(e) => return Err(e),
+    };
+    let target = github_checkout_path(owner, repo)?;
+
+    if !target.exists() {
+        if !ui::can_prompt_interactively() {
+            ui::warn(&format!(
+                "{} is not available locally in {}; skipping interactive clone prompt",
+                info.full_name.bold(),
+                ui::terminal_interface().dimmed(),
+            ));
+            return Ok(None);
+        }
+        let prompt = format!(
+            "{} is not available locally. Clone it to {}?",
+            info.full_name,
+            target.display()
+        );
+        if !ui::confirm_yes_no(&prompt, true)? {
+            return Ok(None);
+        }
+        git::clone(&info.clone_url, &target, github.token())?;
+    }
+
+    db::upsert_project(db, &target)?;
+    db::find_project(db, repo)?
+        .with_context(|| format!("cloned {}, but could not index it", info.full_name))
+        .map(Some)
 }

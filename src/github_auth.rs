@@ -1,3 +1,4 @@
+use crate::github::GitHub;
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use directories::BaseDirs;
@@ -26,11 +27,6 @@ struct AccessTokenResponse {
     access_token: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UserResponse {
-    login: String,
 }
 
 pub fn token_path() -> Result<PathBuf> {
@@ -188,7 +184,8 @@ pub async fn login(client_id: Option<String>) -> Result<()> {
 
         if let Some(token) = response.access_token {
             save_token(&token)?;
-            let login = validate_token(Some(&token))
+            let login = GitHub::new(Some(token))
+                .current_user()
                 .await?
                 .unwrap_or_else(|| "GitHub".into());
             println!("authenticated as {}", login.bold().bright_green());
@@ -214,7 +211,8 @@ pub async fn login(client_id: Option<String>) -> Result<()> {
 pub async fn status() -> Result<()> {
     let path = token_path()?;
     let token = load_token_with_source()?;
-    match validate_token(token.as_ref().map(Token::value)).await? {
+    let github = GitHub::new(token.as_ref().map(|t| t.value().to_string()));
+    match github.current_user().await? {
         Some(login) => println!(
             "authenticated as {} ({})",
             login.bold().bright_green(),
@@ -228,32 +226,37 @@ pub async fn status() -> Result<()> {
     Ok(())
 }
 
-pub async fn validate_token(token: Option<&str>) -> Result<Option<String>> {
-    let Some(token) = token else {
-        return Ok(None);
-    };
-    let response = reqwest::Client::new()
-        .get("https://api.github.com/user")
-        .header(reqwest::header::USER_AGENT, "pm")
-        .bearer_auth(token)
-        .send()
-        .await?;
-    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+/// The saved token; if there is none and `gh` is installed, offer `gh auth login`.
+pub fn token_or_login() -> Result<Option<String>> {
+    let token = load_token()?;
+    if token.is_some() || !crate::ui::can_prompt_interactively() || !gh_cli_available() {
+        return Ok(token);
+    }
+    if !crate::ui::confirm_yes_no("No GitHub token found. Run `gh auth login` now?", true)? {
         return Ok(None);
     }
-    let user = response.error_for_status()?.json::<UserResponse>().await?;
-    Ok(Some(user.login))
+    let status = Command::new("gh")
+        .args(["auth", "login"])
+        .status()
+        .context("failed to run gh auth login")?;
+    if !status.success() {
+        bail!("gh auth login failed");
+    }
+    load_token()
 }
 
-pub fn client() -> Result<octocrab::Octocrab> {
-    if let Some(token) = load_token_with_source()? {
-        return octocrab::Octocrab::builder()
-            .personal_token(token.value)
-            .build()
-            .context("failed to build authenticated GitHub client");
-    }
+/// The saved token, or an error telling the user how to log in.
+pub fn require_token() -> Result<String> {
+    token_or_login()?
+        .context("GitHub authentication required; run `gh auth login` or `p github login` first")
+}
 
-    octocrab::Octocrab::builder()
-        .build()
-        .context("failed to build GitHub client")
+fn gh_cli_available() -> bool {
+    Command::new("gh")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }

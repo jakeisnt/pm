@@ -1,29 +1,28 @@
 mod cli;
 mod config;
 mod db;
+mod git;
+mod github;
 mod github_auth;
 mod project;
+mod shell;
+mod sync;
+mod ui;
+mod worktree;
 
 use anyhow::{Context, Result, bail};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use clap::Parser;
-use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd, Shell, WorktreeCmd};
-use colored::{Color, Colorize};
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    terminal,
-};
+use cli::{Cli, Commands, ConfigCmd, GithubCmd, OrgCmd};
+use colored::Colorize;
+use github::GitHub;
 use project::Project;
-use regex::Regex;
-use serde::Deserialize;
-use skim::{prelude::*, tui::BorderType};
-use sqlx::SqlitePool;
+use rusqlite::Connection;
 use std::{
     collections::BTreeMap,
     env, fs,
-    io::{self, Cursor, IsTerminal, Write},
     path::{Path, PathBuf},
     process::Command,
+    time::Duration,
 };
 
 #[tokio::main]
@@ -36,29 +35,29 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let cli = Cli::parse();
-    if let Some(Commands::Hook { shell }) = &cli.command {
-        hook_cmd(*shell);
-        return Ok(());
-    }
-    if let Some(Commands::HookInstall { shell }) = &cli.command {
-        install_hook_cmd(*shell)?;
-        return Ok(());
+    // Commands that don't touch the project index.
+    match cli.command {
+        Some(Commands::Hook { shell }) => {
+            shell::print_hook(shell);
+            return Ok(());
+        }
+        Some(Commands::HookInstall { shell }) => return shell::install_hook(shell),
+        Some(Commands::Worktree { project, command }) => {
+            return worktree_cmd(project, command).await;
+        }
+        _ => {}
     }
 
-    let pool = db::connect().await?;
-    db::migrate(&pool).await?;
+    let pool = db::open()?;
+    if !matches!(cli.command, Some(Commands::Index { .. })) {
+        refresh_index(&pool);
+    }
 
     match cli.command {
-        Some(Commands::Resolve { name }) => {
-            if let Some(p) = db::find_project(&pool, &name).await? {
-                let p = ensure_local_project(&pool, p).await?;
-                print!("{}", p.path);
-            } else if let Some(p) = maybe_clone_github_repo(&pool, &name).await? {
-                print!("{}", p.path);
-            } else {
-                std::process::exit(1);
-            }
-        }
+        Some(Commands::Resolve { name }) => match project::resolve(&pool, &name).await? {
+            Some(p) => print!("{}", p.path),
+            None => std::process::exit(1),
+        },
         Some(Commands::Create {
             name,
             public,
@@ -69,119 +68,79 @@ async fn run() -> Result<()> {
             source,
             scope,
             json,
-        }) => list(&pool, source, scope, json).await?,
-        Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force).await?,
+        }) => list(&pool, source, scope, json)?,
+        Some(Commands::Remove { path, force }) => remove_cmd(&pool, path, force)?,
         Some(Commands::Rename { old_name, new_name }) => {
             rename_cmd(&pool, &old_name, &new_name).await?
         }
         Some(Commands::Dev) => dev_cmd()?,
         Some(Commands::Config { command }) => config_cmd(command)?,
-        Some(Commands::Org { command }) => org_cmd(&pool, command).await?,
+        Some(Commands::Org { command }) => org_cmd(&pool, command)?,
         Some(Commands::Github { command }) => github_cmd(command).await?,
-        Some(Commands::Hook { shell }) => hook_cmd(shell),
-        Some(Commands::HookInstall { shell }) => install_hook_cmd(shell)?,
-        Some(Commands::Index { path, quiet }) => index_cmd(&pool, path, quiet).await?,
-        Some(Commands::Worktree { command }) => worktree_cmd(command)?,
+        Some(cmd @ Commands::Index { .. }) => index_cmd(&pool, cmd).await?,
+        Some(Commands::Hook { .. } | Commands::HookInstall { .. } | Commands::Worktree { .. }) => {
+            unreachable!("handled before connecting to the database")
+        }
         None => select_cmd(&pool, cli).await?,
     }
     Ok(())
 }
 
-async fn select_cmd(db: &SqlitePool, cli: Cli) -> Result<()> {
-    let ps = db::projects(db).await?;
+/// Kick off a background sync if the index is stale; never fails a command.
+fn refresh_index(db: &Connection) {
+    if let Err(e) = sync::refresh_in_background(db) {
+        ui::warn(&format!("background sync not started: {e:#}"));
+    }
+}
+
+async fn select_cmd(db: &Connection, cli: Cli) -> Result<()> {
     if cli.json {
-        println!("{}", serde_json::to_string(&ps)?);
+        println!("{}", serde_json::to_string(&db::projects(db)?)?);
         return Ok(());
     }
-
-    let p = if let Some(n) = cli.name {
-        match db::find_project(db, &n).await? {
-            Some(p) => ensure_local_project(db, p).await?,
-            None => match maybe_clone_github_repo(db, &n).await? {
-                Some(p) => p,
-                None => {
-                    eprintln!(
-                        "{} no project found for {}",
-                        "warning:".yellow().bold(),
-                        n.bold()
-                    );
-                    let Some(p) = choose(ps, Some(&n))? else {
-                        return Ok(());
-                    };
-                    ensure_local_project(db, p).await?
-                }
-            },
-        }
-    } else {
-        let Some(p) = choose(ps, None)? else {
-            return Ok(());
-        };
-        ensure_local_project(db, p).await?
+    let Some(p) = project::resolve_or_pick(db, cli.name.as_deref()).await? else {
+        return Ok(());
     };
-    db::touch(db, &p).await?;
+    db::touch(db, &p)?;
 
     if cli.path || cli.silent {
         if cli.path {
             print!("{}", p.path);
         }
     } else if cli.agent {
-        spawn_agent_in(&p.path)?;
+        ui::spawn_agent_in(&p.path)?;
     } else if let Some(cmd) = cli.open {
         Command::new(cmd).arg(&p.path).status()?;
     } else if let Some(app) = cli.app {
         Command::new("open").args(["-a", &app, &p.path]).status()?;
     } else {
-        spawn_shell_in(&p.path)?;
+        ui::spawn_shell_in(&p.path)?;
     }
     Ok(())
 }
 
-async fn ensure_local_project(db: &SqlitePool, project: Project) -> Result<Project> {
-    if let Some(name) = project.path.strip_prefix("github://") {
-        return maybe_clone_github_repo(db, name)
-            .await?
-            .with_context(|| format!("{} is not available locally", project.path));
+/// Run a worktree command in the named project, or in the project that
+/// contains the current directory.
+async fn worktree_cmd(project: Option<String>, command: Option<cli::WorktreeCmd>) -> Result<()> {
+    if let Some(name) = project {
+        let db = db::open()?;
+        refresh_index(&db);
+        let Some(project) = project::resolve_or_pick(&db, Some(&name)).await? else {
+            return Ok(());
+        };
+        env::set_current_dir(&project.path)
+            .with_context(|| format!("cannot enter {}", project.path))?;
+    } else if git::repo_root(&env::current_dir()?).is_none() {
+        bail!(
+            "not inside a project; pass {} or cd into one",
+            "--project <name>".bold()
+        );
     }
-
-    if Path::new(&project.path).exists() {
-        return Ok(project);
-    }
-
-    if let Some(full_name) = project
-        .github_full_name
-        .as_deref()
-        .map(str::to_owned)
-        .or_else(|| infer_github_full_name_from_path(&project.path))
-    {
-        db::mark_project_remote_only(db, &project.id, &full_name).await?;
-        return maybe_clone_github_repo(db, &full_name)
-            .await?
-            .with_context(|| format!("{full_name} is not available locally"));
-    }
-
-    Ok(project)
-}
-
-fn infer_github_full_name_from_path(path: &str) -> Option<String> {
-    let path = Path::new(path);
-    let repo = path.file_name()?.to_str()?;
-    let owner = path.parent()?.file_name()?.to_str()?;
-    Some(format!("{owner}/{repo}"))
-}
-
-#[derive(Debug, Deserialize)]
-struct GitHubRepoResponse {
-    full_name: String,
-    clone_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct GitHubRepoListItem {
-    full_name: String,
+    worktree::run(command)
 }
 
 async fn create_cmd(
-    db: &SqlitePool,
+    db: &Connection,
     name: &str,
     public: bool,
     description: Option<String>,
@@ -192,61 +151,26 @@ async fn create_cmd(
         );
     }
 
-    let token = load_github_token_or_prompt_login()?
-        .context("GitHub authentication required; run `gh auth login` or `p github login` first")?;
-    let login = github_auth::validate_token(Some(&token))
+    let github = GitHub::new(Some(github_auth::require_token()?));
+    let login = github
+        .current_user()
         .await?
         .context("GitHub authentication is invalid; run `p github login` or `gh auth login`")?;
 
-    let (owner, repo) = if let Some((owner, repo)) = name.split_once('/') {
-        (owner.to_string(), repo.to_string())
-    } else {
-        (login.clone(), name.to_string())
-    };
-    validate_github_repo_parts(&owner, &repo)?;
+    let (owner, repo) = name.split_once('/').unwrap_or((&login, name));
+    validate_github_repo_parts(owner, repo)?;
 
-    let target = github_checkout_path(&owner, &repo)?;
+    let target = project::github_checkout_path(owner, repo)?;
     if target.exists() {
         bail!("local target already exists: {}", target.display());
     }
 
-    let url = if owner.eq_ignore_ascii_case(&login) {
-        "https://api.github.com/user/repos".to_string()
-    } else {
-        format!("https://api.github.com/orgs/{owner}/repos")
-    };
-    let body = serde_json::json!({
-        "name": repo,
-        "private": !public,
-        "description": description,
-    });
-    let response = reqwest::Client::new()
-        .post(url)
-        .header(reqwest::header::USER_AGENT, "pm")
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .bearer_auth(&token)
-        .json(&body)
-        .send()
-        .await
-        .context("failed to call GitHub repository create API")?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        bail!("failed to create GitHub repository {owner}/{repo}: {status} {body}");
-    }
-    let repo_info = response
-        .json::<GitHubRepoResponse>()
-        .await
-        .context("failed to parse GitHub repository create response")?;
-
-    git_clone(
-        &repo_info.full_name,
-        &repo_info.clone_url,
-        &target,
-        Some(&token),
-    )?;
-    db::upsert_project(db, &target).await?;
+    let org = (!owner.eq_ignore_ascii_case(&login)).then_some(owner);
+    let created = github
+        .create_repo(org, repo, description.as_deref())
+        .await?;
+    git::clone(&created.clone_url, &target, github.token())?;
+    db::upsert_project(db, &target)?;
     println!("{}", target.display());
     Ok(())
 }
@@ -258,254 +182,8 @@ fn validate_github_repo_parts(owner: &str, repo: &str) -> Result<()> {
     Ok(())
 }
 
-async fn maybe_clone_github_repo(db: &SqlitePool, name: &str) -> Result<Option<Project>> {
-    let Some((owner, repo)) = name.split_once('/') else {
-        return Ok(None);
-    };
-    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
-        return Ok(None);
-    }
-
-    let token = load_github_token_or_prompt_login()?;
-    let github = github_auth::client()?;
-    let repo_info = github.repos(owner, repo).get().await.with_context(|| {
-        let auth_hint = if token.is_some() {
-            "check that your token has private-repository access and org SSO authorization"
-        } else {
-            "authenticate with `gh auth login` or `p github login` to access private repositories"
-        };
-        format!("GitHub repository not found or inaccessible: {owner}/{repo}; {auth_hint}")
-    })?;
-    let full_name = repo_info
-        .full_name
-        .clone()
-        .unwrap_or_else(|| format!("{owner}/{repo}"));
-    let target = github_checkout_path(owner, repo)?;
-
-    if target.exists() {
-        db::upsert_project(db, &target).await?;
-        return db::find_project(db, repo).await;
-    }
-
-    let prompt = format!(
-        "{full_name} is not available locally. Clone it to {}?",
-        target.display()
-    );
-    if can_prompt_interactively() {
-        if !confirm_yes_no(&prompt, true)? {
-            return Ok(None);
-        }
-    } else {
-        eprintln!(
-            "{} {} is not available locally in {}; skipping interactive clone prompt",
-            "warning:".yellow().bold(),
-            full_name.bold(),
-            terminal_interface().dimmed(),
-        );
-        return Ok(None);
-    }
-
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let clone_url = repo_info
-        .clone_url
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| format!("https://github.com/{full_name}.git"));
-    let mut clone = Command::new("git");
-    clone.arg("clone");
-    if let Some(token) = token.as_deref() {
-        clone
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
-            .env("GIT_CONFIG_VALUE_0", github_git_auth_header(token));
-    }
-    let status = clone
-        .arg(&clone_url)
-        .arg(&target)
-        .status()
-        .context("failed to run git clone")?;
-    if !status.success() {
-        bail!("git clone failed for {full_name}");
-    }
-
-    db::upsert_project(db, &target).await?;
-    db::find_project(db, repo)
-        .await?
-        .with_context(|| format!("cloned {full_name}, but could not index it"))
-        .map(Some)
-}
-
-fn load_github_token_or_prompt_login() -> Result<Option<String>> {
-    let token = github_auth::load_token()?;
-    if token.is_some() || !can_prompt_interactively() || !gh_cli_available() {
-        return Ok(token);
-    }
-
-    if !confirm_yes_no("No GitHub token found. Run `gh auth login` now?", true)? {
-        return Ok(None);
-    }
-
-    let status = Command::new("gh")
-        .args(["auth", "login"])
-        .status()
-        .context("failed to run gh auth login")?;
-    if !status.success() {
-        bail!("gh auth login failed");
-    }
-
-    github_auth::load_token()
-}
-
-fn gh_cli_available() -> bool {
-    Command::new("gh")
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn github_git_auth_header(token: &str) -> String {
-    let credentials = BASE64.encode(format!("x-access-token:{token}"));
-    format!("Authorization: Basic {credentials}")
-}
-
-fn git_clone(full_name: &str, clone_url: &str, target: &Path, token: Option<&str>) -> Result<()> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut clone = Command::new("git");
-    clone.arg("clone");
-    if let Some(token) = token {
-        clone
-            .env("GIT_CONFIG_COUNT", "1")
-            .env("GIT_CONFIG_KEY_0", "http.extraHeader")
-            .env("GIT_CONFIG_VALUE_0", github_git_auth_header(token));
-    }
-    let status = clone
-        .arg(clone_url)
-        .arg(target)
-        .status()
-        .context("failed to run git clone")?;
-    if !status.success() {
-        bail!("git clone failed for {full_name}");
-    }
-    Ok(())
-}
-
-fn github_checkout_path(owner: &str, repo: &str) -> Result<PathBuf> {
-    let home = directories::BaseDirs::new()
-        .context("home dir unavailable")?
-        .home_dir()
-        .to_path_buf();
-    Ok(home.join("Documents").join(owner).join(repo))
-}
-
-fn style_scope(scope: &str) -> colored::ColoredString {
-    scope.bold().color(Color::BrightCyan)
-}
-
-fn style_name(name: &str) -> colored::ColoredString {
-    name.bold().color(Color::BrightGreen)
-}
-
-fn style_path(path: &str) -> colored::ColoredString {
-    path.dimmed()
-}
-
-fn choose(ps: Vec<Project>, initial_query: Option<&str>) -> Result<Option<Project>> {
-    if ps.is_empty() {
-        bail!("no projects found")
-    }
-
-    let input = ps
-        .iter()
-        .map(|p| format!("{}\t{}\t{}", style_name(&p.name), style_path(&p.path), p.id))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut options_builder = SkimOptionsBuilder::default();
-    options_builder
-        .prompt(format!("{} ", "Select project>".bright_cyan().bold()))
-        .height("80%")
-        .reverse(true)
-        .border(BorderType::Rounded)
-        .with_nth(vec!["1".to_string(), "2".to_string()])
-        .delimiter(Regex::new("\t").context("failed to configure project selector delimiter")?);
-    if let Some(query) = initial_query {
-        options_builder.query(query.to_string());
-    }
-    let options = options_builder
-        .build()
-        .context("failed to configure project selector")?;
-    let item_reader = SkimItemReader::new(SkimItemReaderOption::default().ansi(true));
-    let items = item_reader.of_bufread(Cursor::new(input));
-    let output = Skim::run_with(options, Some(items))
-        .map_err(|err| anyhow::anyhow!("failed to run project selector: {err}"))?;
-    if output.is_abort {
-        return Ok(None);
-    }
-    let Some(selected) = output.selected_items.first() else {
-        return Ok(None);
-    };
-    let selected_output = selected.output();
-    let id = selected_output
-        .rsplit('\t')
-        .next()
-        .context("project selector returned an invalid selection")?;
-
-    ps.into_iter()
-        .find(|p| p.id == id)
-        .context("selected project no longer exists")
-        .map(Some)
-}
-
-fn spawn_agent_in(path: &str) -> Result<()> {
-    Command::new("pi")
-        .current_dir(path)
-        .status()
-        .context("failed to launch pi")?;
-    Ok(())
-}
-
-fn spawn_shell_in(path: &str) -> Result<()> {
-    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let shell_path = PathBuf::from(&shell);
-    let shell_name = shell_path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("sh");
-
-    let mut command = Command::new(&shell);
-    if shell_name == "fish" {
-        command
-            .arg("-c")
-            .arg("cd $argv[1]; and exec $argv[2]")
-            .arg(path)
-            .arg(&shell);
-    } else {
-        command
-            .arg("-c")
-            .arg("cd \"$1\" && exec \"$2\" -l")
-            .arg("p")
-            .arg(path)
-            .arg(&shell);
-    }
-    command.status()?;
-    Ok(())
-}
-
-async fn list(
-    db: &SqlitePool,
-    source: Option<String>,
-    scope: Option<String>,
-    json: bool,
-) -> Result<()> {
-    let mut ps = db::projects(db).await?;
+fn list(db: &Connection, source: Option<String>, scope: Option<String>, json: bool) -> Result<()> {
+    let mut ps = db::projects(db)?;
     if let Some(s) = source {
         ps.retain(|p| p.source == s);
     }
@@ -523,61 +201,48 @@ async fn list(
                 .push(p);
         }
         for (g, items) in groups {
-            println!("{}", style_scope(&g));
+            println!("{}", ui::style_scope(&g));
             for p in items {
-                println!("  {}  {}", style_name(&p.name), style_path(&p.path));
+                println!("  {}  {}", ui::style_name(&p.name), ui::style_path(&p.path));
             }
         }
     }
     Ok(())
 }
 
-async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Result<()> {
-    let target = resolve_remove_target(db, path).await?;
+fn remove_cmd(db: &Connection, path: Option<String>, force: bool) -> Result<()> {
+    let target = resolve_remove_target(db, path)?;
     let p = target.path();
 
     print_remove_target(&target, force);
 
     if !force {
-        if can_prompt_interactively() {
+        if ui::can_prompt_interactively() {
             let prompt = format!("Delete {} permanently?", p.display().to_string().dimmed());
-            if !confirm_yes_no(&prompt, false)? {
+            if !ui::confirm_yes_no(&prompt, false)? {
                 println!("{} delete cancelled", "cancelled:".yellow().bold());
                 return Ok(());
             }
         } else {
-            eprintln!(
-                "{} refusing to delete without {} in {}; re-run with {} to permanently delete the directory above",
-                "warning:".yellow().bold(),
+            ui::warn(&format!(
+                "refusing to delete without {} in {}; re-run with {} to permanently delete the directory above",
                 "--force".bold(),
-                terminal_interface().dimmed(),
+                ui::terminal_interface().dimmed(),
                 "--force".bold(),
-            );
+            ));
             return Ok(());
         }
     }
 
     if let RemoveTarget::Project(project) = &target {
-        db::begin_immediate_transaction(db).await?;
-        let mark_result = async {
-            if let Some(full_name) = project.github_full_name.as_deref() {
-                db::mark_project_remote_only(db, &project.id, full_name).await
-            } else {
-                db::mark_project_deleted(db, &project.id).await
+        // Only forget the project if the directory is really gone.
+        db::transaction(db, || {
+            match project.github_full_name.as_deref() {
+                Some(full_name) => db::mark_project_remote_only(db, &project.id, full_name)?,
+                None => db::mark_project_deleted(db, &project.id)?,
             }
-        }
-        .await;
-        if let Err(error) = mark_result {
-            let _ = db::rollback_transaction(db).await;
-            return Err(error);
-        }
-
-        if let Err(error) = fs::remove_dir_all(p) {
-            let _ = db::rollback_transaction(db).await;
-            return Err(error).with_context(|| format!("failed to delete {}", p.display()));
-        }
-
-        db::commit_transaction(db).await?;
+            fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))
+        })?;
     } else {
         fs::remove_dir_all(p).with_context(|| format!("failed to delete {}", p.display()))?;
     }
@@ -590,10 +255,9 @@ async fn remove_cmd(db: &SqlitePool, path: Option<String>, force: bool) -> Resul
     Ok(())
 }
 
-async fn rename_cmd(db: &SqlitePool, project_name: &str, new_name: &str) -> Result<()> {
+async fn rename_cmd(db: &Connection, project_name: &str, new_name: &str) -> Result<()> {
     validate_project_name(new_name)?;
-    let project = db::find_project(db, project_name)
-        .await?
+    let project = db::find_project(db, project_name)?
         .with_context(|| format!("no project found for {project_name}"))?;
 
     let local_paths = if project.path.starts_with("github://") {
@@ -617,7 +281,10 @@ async fn rename_cmd(db: &SqlitePool, project_name: &str, new_name: &str) -> Resu
         let (owner, _) = old_full_name
             .split_once('/')
             .with_context(|| format!("invalid indexed GitHub repository name: {old_full_name}"))?;
-        let full_name = rename_github_repository(old_full_name, new_name).await?;
+        let full_name = GitHub::new(Some(github_auth::require_token()?))
+            .rename_repo(old_full_name, new_name)
+            .await?
+            .full_name;
         if full_name != format!("{owner}/{new_name}") {
             bail!("GitHub returned an unexpected repository name after rename: {full_name}");
         }
@@ -651,8 +318,7 @@ async fn rename_cmd(db: &SqlitePool, project_name: &str, new_name: &str) -> Resu
         new_name,
         &indexed_path,
         new_github_full_name.as_deref(),
-    )
-    .await?;
+    )?;
 
     if let (Some((_, new_path)), Some(old_full_name), Some(new_full_name)) = (
         local_paths.as_ref(),
@@ -689,38 +355,13 @@ fn validate_project_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-async fn rename_github_repository(old_full_name: &str, new_name: &str) -> Result<String> {
-    let token = load_github_token_or_prompt_login()?
-        .context("GitHub authentication required; run `gh auth login` or `p github login` first")?;
-    let response = reqwest::Client::new()
-        .patch(format!("https://api.github.com/repos/{old_full_name}"))
-        .header(reqwest::header::USER_AGENT, "pm")
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .bearer_auth(token)
-        .json(&serde_json::json!({ "name": new_name }))
-        .send()
-        .await
-        .context("failed to call GitHub repository rename API")?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        bail!("failed to rename GitHub repository {old_full_name}: {status} {body}");
-    }
-    let repo = response
-        .json::<GitHubRepoResponse>()
-        .await
-        .context("failed to parse GitHub repository rename response")?;
-    Ok(repo.full_name)
-}
-
 fn update_github_remote(path: &Path, old_full_name: &str, new_full_name: &str) -> Result<()> {
-    let old_url = git_output(path, ["remote", "get-url", "origin"])?;
+    let old_url = git::output(path, &["remote", "get-url", "origin"])?;
     let new_url = old_url.replace(old_full_name, new_full_name);
     if new_url == old_url {
         bail!("renamed project, but could not recognize the GitHub origin URL: {old_url}");
     }
-    run_git(path, ["remote", "set-url", "origin", &new_url])
+    git::run(path, &["remote", "set-url", "origin", &new_url])
 }
 
 enum RemoveTarget {
@@ -737,7 +378,7 @@ impl RemoveTarget {
     }
 }
 
-async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<RemoveTarget> {
+fn resolve_remove_target(db: &Connection, path: Option<String>) -> Result<RemoveTarget> {
     let Some(input) = path else {
         return Ok(RemoveTarget::Path(env::current_dir()?));
     };
@@ -747,7 +388,7 @@ async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<
         return Ok(RemoveTarget::Path(candidate));
     }
 
-    if let Some(project) = db::find_project(db, &input).await? {
+    if let Some(project) = db::find_project(db, &input)? {
         if project.path.starts_with("github://") {
             bail!(
                 "found remote-only project {} at {}; there is no local directory to delete",
@@ -773,70 +414,13 @@ async fn resolve_remove_target(db: &SqlitePool, path: Option<String>) -> Result<
     )
 }
 
-fn confirm_yes_no(prompt: &str, default: bool) -> Result<bool> {
-    let suffix = if default { " [Y/n] " } else { " [y/N] " };
-    print!("{prompt}{suffix}");
-    io::stdout().flush()?;
-
-    terminal::enable_raw_mode().context("failed to enable raw terminal mode")?;
-    let result = loop {
-        let event = match event::read().context("failed to read terminal input") {
-            Ok(event) => event,
-            Err(error) => break Err(error),
-        };
-        match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => break Ok(true),
-                KeyCode::Char('n') | KeyCode::Char('N') => break Ok(false),
-                KeyCode::Enter => break Ok(default),
-                KeyCode::Esc => break Ok(false),
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    break Err(anyhow::anyhow!("confirmation interrupted"));
-                }
-                _ => {}
-            },
-            _ => {}
-        }
-    };
-    let disable_result =
-        terminal::disable_raw_mode().context("failed to disable raw terminal mode");
-
-    match (&result, default) {
-        (Ok(true), _) => println!("y"),
-        (Ok(false), _) => println!("n"),
-        (Err(_), _) => println!(),
-    }
-
-    disable_result?;
-    result
-}
-
-fn can_prompt_interactively() -> bool {
-    if env::var_os("CI").is_some() || env::var_os("GITHUB_ACTIONS").is_some() {
-        return false;
-    }
-
-    io::stdin().is_terminal() && io::stdout().is_terminal()
-}
-
-fn terminal_interface() -> String {
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return "a non-interactive terminal".to_string();
-    }
-
-    env::var("TERM_PROGRAM")
-        .map(|program| format!("{program} terminal"))
-        .or_else(|_| env::var("TERM").map(|term| format!("{term} terminal")))
-        .unwrap_or_else(|_| "this terminal".to_string())
-}
-
 fn print_remove_target(target: &RemoveTarget, force: bool) {
     let action = if force { "deleting" } else { "would delete" };
     println!("{}", format!("{action}:").yellow().bold());
     match target {
         RemoveTarget::Project(project) => {
-            println!("  {} {}", "project:".bold(), style_name(&project.name));
-            println!("  {} {}", "path:".bold(), style_path(&project.path));
+            println!("  {} {}", "project:".bold(), ui::style_name(&project.name));
+            println!("  {} {}", "path:".bold(), ui::style_path(&project.path));
             println!("  {} {}", "source:".bold(), project.source.dimmed());
             if let Some(scope) = project.scope.as_deref() {
                 println!("  {} {}", "scope:".bold(), scope.dimmed());
@@ -871,38 +455,48 @@ fn dev_cmd() -> Result<()> {
 }
 
 fn config_cmd(cmd: ConfigCmd) -> Result<()> {
-    let path = config::config_path()?;
-    let mut v: serde_json::Value = fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or(serde_json::json!({}));
+    let path = config::active_path()?;
+    let mut v: serde_json::Value = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text)
+            .with_context(|| format!("{} is not valid JSON", path.display()))?,
+        Err(_) => serde_json::json!({}),
+    };
     match cmd {
-        ConfigCmd::List => println!("{}", serde_json::to_string_pretty(&v)?),
+        ConfigCmd::List => {
+            ui::info(&format!("config @ {}", ui::tildify(&path)));
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            return Ok(());
+        }
+        // `3` and `["~/code"]` are stored as JSON; anything else as a string.
         ConfigCmd::Set { key, value } => {
-            v[&key] = serde_json::Value::String(value);
-            fs::write(path, serde_json::to_string_pretty(&v)?)?
+            v[&key] = serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value))
         }
         ConfigCmd::Delete { key } => {
-            v.as_object_mut().map(|o| o.remove(&key));
-            fs::write(path, serde_json::to_string_pretty(&v)?)?
+            if let Some(o) = v.as_object_mut() {
+                o.remove(&key);
+            }
         }
     }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(&v)? + "\n")?;
     Ok(())
 }
 
-async fn org_cmd(db: &SqlitePool, cmd: OrgCmd) -> Result<()> {
+fn org_cmd(db: &Connection, cmd: OrgCmd) -> Result<()> {
     match cmd {
         OrgCmd::List => {
-            for (n, h) in db::orgs(db).await? {
-                if h != 0 {
-                    println!("{} {}", style_name(&n), "(hidden)".yellow());
+            for (n, hidden) in db::orgs(db)? {
+                if hidden {
+                    println!("{} {}", ui::style_name(&n), "(hidden)".yellow());
                 } else {
-                    println!("{}", style_name(&n));
+                    println!("{}", ui::style_name(&n));
                 }
             }
         }
-        OrgCmd::Hide { name } => db::set_org_hidden(db, name, true).await?,
-        OrgCmd::Show { name } => db::set_org_hidden(db, name, false).await?,
+        OrgCmd::Hide { name } => db::set_org_hidden(db, &name, true)?,
+        OrgCmd::Show { name } => db::set_org_hidden(db, &name, false)?,
     }
     Ok(())
 }
@@ -916,559 +510,41 @@ async fn github_cmd(cmd: GithubCmd) -> Result<()> {
     Ok(())
 }
 
-async fn index_cmd(db: &SqlitePool, path: Option<String>, quiet: bool) -> Result<()> {
+async fn index_cmd(db: &Connection, cmd: Commands) -> Result<()> {
+    let Commands::Index {
+        path,
+        quiet,
+        watch,
+        interval,
+        background,
+    } = cmd
+    else {
+        unreachable!("index_cmd only handles Commands::Index")
+    };
     if let Some(path) = path {
-        let path = PathBuf::from(path);
-        let Some(root) = db::git_repo_root(&path)? else {
+        let Some(root) = git::repo_root(Path::new(&path)) else {
             if !quiet {
-                eprintln!("{} not inside a git repository", "warning:".yellow().bold());
+                ui::warn("not inside a git repository");
             }
             return Ok(());
         };
-        db::upsert_project(db, &root).await?;
+        db::upsert_project(db, &root)?;
         if !quiet {
-            println!("{} {}", "indexed".green().bold(), root.display());
+            ui::success(&format!("indexed {}", root.display()));
         }
         return Ok(());
     }
-
-    let local = db::scan(db).await?;
-    let remote = index_remote_repos(db, quiet).await?;
-    if !quiet {
-        println!(
-            "{} {} local, {} remote",
-            "indexed".green().bold(),
-            local,
-            remote
-        );
+    if watch {
+        let interval = interval
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| config::load().sync_interval());
+        return sync::watch(db, interval).await;
     }
-    Ok(())
-}
-
-fn worktree_cmd(cmd: WorktreeCmd) -> Result<()> {
-    match cmd {
-        WorktreeCmd::Checkout { branch_name } => worktree_checkout(&branch_name),
-    }
-}
-
-#[derive(Clone, Debug)]
-struct GitWorktree {
-    path: PathBuf,
-    branch: Option<String>,
-}
-
-fn worktree_checkout(branch: &str) -> Result<()> {
-    let cwd = env::current_dir()?;
-    let worktrees = git_worktrees(&cwd)?;
-    let primary = primary_worktree(&cwd, &worktrees)?;
-    ensure_branch_exists(&primary.path, branch)?;
-    ensure_clean(&primary.path, "primary worktree")?;
-    let source = worktrees
-        .iter()
-        .find(|w| w.branch.as_deref() == Some(branch));
-
-    let mut stash_ref = None;
-    if let Some(source) = source.filter(|w| w.path != primary.path) {
-        stash_ref = stash_worktree_changes(&source.path, branch)?;
-        run_git(&source.path, ["switch", "--detach"])?;
-    }
-
-    run_git(&primary.path, ["switch", branch])?;
-
-    if let Some(stash_ref) = stash_ref {
-        run_git(&primary.path, ["stash", "apply", "--index", &stash_ref])?;
-        drop_stash_if_still_top(&primary.path, &stash_ref)?;
-    }
-
-    println!(
-        "{} checked out {} in {}",
-        "ok:".green().bold(),
-        branch.bold(),
-        primary.path.display().to_string().dimmed()
-    );
-    Ok(())
-}
-
-fn git_worktrees(cwd: &Path) -> Result<Vec<GitWorktree>> {
-    let output = git_output(cwd, ["worktree", "list", "--porcelain"])?;
-    let mut worktrees = Vec::new();
-    let mut path = None;
-    let mut branch = None;
-
-    for line in output.lines().chain(std::iter::once("")) {
-        if line.is_empty() {
-            if let Some(path) = path.take() {
-                worktrees.push(GitWorktree {
-                    path,
-                    branch: branch.take(),
-                });
-            }
-        } else if let Some(value) = line.strip_prefix("worktree ") {
-            path = Some(PathBuf::from(value));
-        } else if let Some(value) = line.strip_prefix("branch refs/heads/") {
-            branch = Some(value.to_string());
-        }
-    }
-
-    if worktrees.is_empty() {
-        bail!("no git worktrees found");
-    }
-    Ok(worktrees)
-}
-
-fn primary_worktree(cwd: &Path, worktrees: &[GitWorktree]) -> Result<GitWorktree> {
-    let common_dir = git_output(
-        cwd,
-        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    )?;
-    let common_dir = PathBuf::from(common_dir.trim());
-    let common_parent = common_dir.parent();
-
-    worktrees
-        .iter()
-        .find(|w| Some(w.path.as_path()) == common_parent)
-        .or_else(|| worktrees.first())
-        .cloned()
-        .context("could not determine primary worktree")
-}
-
-fn stash_worktree_changes(path: &Path, branch: &str) -> Result<Option<String>> {
-    let status = git_output(path, ["status", "--porcelain"])?;
-    if status.trim().is_empty() {
-        return Ok(None);
-    }
-
-    let before = git_output(path, ["rev-parse", "--verify", "-q", "refs/stash"]).ok();
-    run_git(
-        path,
-        [
-            "stash",
-            "push",
-            "-u",
-            "-m",
-            &format!("pm worktree checkout {branch}"),
-        ],
-    )?;
-    let after = git_output(path, ["rev-parse", "--verify", "-q", "stash@{0}"]).ok();
-    if before == after {
-        bail!("git stash did not create a stash for {}", path.display());
-    }
-    Ok(after)
-}
-
-fn ensure_branch_exists(path: &Path, branch: &str) -> Result<()> {
-    git_output(
-        path,
-        ["show-ref", "--verify", &format!("refs/heads/{branch}")],
-    )
-    .map(|_| ())
-    .with_context(|| format!("branch not found: {branch}"))
-}
-
-fn ensure_clean(path: &Path, label: &str) -> Result<()> {
-    let status = git_output(path, ["status", "--porcelain"])?;
-    if !status.trim().is_empty() {
-        bail!(
-            "{label} has uncommitted changes; commit, stash, or clean {} before moving worktrees",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-async fn index_remote_repos(db: &SqlitePool, quiet: bool) -> Result<usize> {
-    let Some(token) = github_auth::load_token()? else {
-        if !quiet {
-            eprintln!(
-                "{} remote indexing skipped; authenticate with {} first",
-                "warning:".yellow().bold(),
-                "p github login".bold()
-            );
-        }
-        return Ok(0);
-    };
-
-    let http = reqwest::Client::new();
-    let mut indexed = 0;
-    let mut page = 1;
-    loop {
-        let repos = http
-            .get("https://api.github.com/user/repos")
-            .query(&[
-                ("affiliation", "owner,collaborator,organization_member"),
-                ("per_page", "100"),
-                ("page", &page.to_string()),
-            ])
-            .header(reqwest::header::USER_AGENT, "pm")
-            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .bearer_auth(&token)
-            .send()
-            .await
-            .context("failed to list GitHub repositories")?
-            .error_for_status()
-            .context("failed to list GitHub repositories")?
-            .json::<Vec<GitHubRepoListItem>>()
-            .await
-            .context("failed to parse GitHub repository list")?;
-        let count = repos.len();
-        for repo in repos {
-            db::upsert_remote_project(db, &repo.full_name).await?;
-            indexed += 1;
-        }
-        if count < 100 {
-            break;
-        }
-        page += 1;
-    }
-    Ok(indexed)
-}
-
-const ZSH_HOOK: &str = r#"# p: index git repositories after git creates them.
-_p_index_git_repo_at() {
-  emulate -L zsh
-  command -v p >/dev/null 2>&1 || return
-  [[ -n "$1" ]] || return
-  p index --quiet "$1" >/dev/null 2>&1 &!
-}
-_p_git_non_option_args() {
-  emulate -L zsh
-  local -a positional
-  local arg skip_next=0 after_options=0
-  for arg in "$@"; do
-    if (( skip_next )); then
-      skip_next=0
-      continue
-    fi
-    if (( after_options )); then
-      positional+=("$arg")
-      continue
-    fi
-    case "$arg" in
-      --) after_options=1 ;;
-      -b|--branch|-o|--origin|--depth|--config|-c|--jobs|-j|--server-option|--reference|--reference-if-able|--separate-git-dir|--template|-u|--upload-pack) skip_next=1 ;;
-      -*) ;;
-      *) positional+=("$arg") ;;
-    esac
-  done
-  (( ${#positional} )) && printf '%s\n' "${positional[@]}"
-}
-_p_git_clone_dest() {
-  emulate -L zsh
-  local -a positional
-  positional=(${(f)"$(_p_git_non_option_args "$@")"})
-  (( ${#positional} )) || return
-  if (( ${#positional} >= 2 )); then
-    print -r -- "$positional[2]"
-  else
-    local repo="$positional[1]" dest
-    dest="${repo:t}"
-    print -r -- "${dest%.git}"
-  fi
-}
-git() {
-  command git "$@"
-  local git_status=$?
-  (( git_status == 0 )) || return $git_status
-  case "$1" in
-    init)
-      local -a positional
-      positional=(${(f)"$(_p_git_non_option_args "${@:2}")"})
-      if (( ${#positional} )); then
-        _p_index_git_repo_at "$positional[-1]"
-      else
-        _p_index_git_repo_at "$PWD"
-      fi
-      ;;
-    clone)
-      local dest
-      dest="$(_p_git_clone_dest "${@:2}")"
-      [[ -n "$dest" ]] && _p_index_git_repo_at "$dest"
-      ;;
-    worktree)
-      if [[ "$2" == "add" ]]; then
-        local -a positional
-        positional=(${(f)"$(_p_git_non_option_args "${@:3}")"})
-        (( ${#positional} )) && _p_index_git_repo_at "$positional[1]"
-      fi
-      ;;
-  esac
-  return $git_status
-}
-"#;
-
-const BASH_HOOK: &str = r#"# p: index git repositories after git creates them.
-__p_index_git_repo_at() {
-  command -v p >/dev/null 2>&1 || return
-  [ -n "$1" ] || return
-  p index --quiet "$1" >/dev/null 2>&1 &
-}
-__p_git_non_option_args() {
-  local positional=() arg skip_next=0 after_options=0
-  for arg in "$@"; do
-    if [ "$skip_next" -eq 1 ]; then
-      skip_next=0
-      continue
-    fi
-    if [ "$after_options" -eq 1 ]; then
-      positional+=("$arg")
-      continue
-    fi
-    case "$arg" in
-      --) after_options=1 ;;
-      -b|--branch|-o|--origin|--depth|--config|-c|--jobs|-j|--server-option|--reference|--reference-if-able|--separate-git-dir|--template|-u|--upload-pack) skip_next=1 ;;
-      -*) ;;
-      *) positional+=("$arg") ;;
-    esac
-  done
-  [ "${#positional[@]}" -gt 0 ] && printf '%s\n' "${positional[@]}"
-}
-__p_git_clone_dest() {
-  local positional=() repo dest
-  while IFS= read -r line; do
-    positional+=("$line")
-  done < <(__p_git_non_option_args "$@")
-  [ "${#positional[@]}" -gt 0 ] || return
-  if [ "${#positional[@]}" -ge 2 ]; then
-    printf '%s\n' "${positional[1]}"
-  else
-    repo="${positional[0]}"
-    dest="${repo##*/}"
-    printf '%s\n' "${dest%.git}"
-  fi
-}
-git() {
-  command git "$@"
-  local status=$?
-  [ "$status" -eq 0 ] || return "$status"
-  case "$1" in
-    init)
-      local positional=()
-      while IFS= read -r line; do
-        positional+=("$line")
-      done < <(__p_git_non_option_args "${@:2}")
-      if [ "${#positional[@]}" -gt 0 ]; then
-        __p_index_git_repo_at "${positional[$((${#positional[@]} - 1))]}"
-      else
-        __p_index_git_repo_at "$PWD"
-      fi
-      ;;
-    clone)
-      local dest
-      dest="$(__p_git_clone_dest "${@:2}")"
-      [ -n "$dest" ] && __p_index_git_repo_at "$dest"
-      ;;
-    worktree)
-      if [ "$2" = "add" ]; then
-        local positional=()
-        while IFS= read -r line; do
-          positional+=("$line")
-        done < <(__p_git_non_option_args "${@:3}")
-        [ "${#positional[@]}" -gt 0 ] && __p_index_git_repo_at "${positional[0]}"
-      fi
-      ;;
-  esac
-  return "$status"
-}
-"#;
-
-const FISH_HOOK: &str = r#"# p: index git repositories after git creates them.
-function __p_index_git_repo_at
-  command -q p; or return
-  test -n "$argv[1]"; or return
-  p index --quiet "$argv[1]" >/dev/null 2>&1 &
-end
-function __p_git_non_option_args
-  set -l positional
-  set -l skip_next 0
-  set -l after_options 0
-  for arg in $argv
-    if test $skip_next -eq 1
-      set skip_next 0
-      continue
-    end
-    if test $after_options -eq 1
-      set -a positional "$arg"
-      continue
-    end
-    switch "$arg"
-      case --
-        set after_options 1
-      case -b --branch -o --origin --depth --config -c --jobs -j --server-option --reference --reference-if-able --separate-git-dir --template -u --upload-pack
-        set skip_next 1
-      case '-*'
-      case '*'
-        set -a positional "$arg"
-    end
-  end
-  test (count $positional) -gt 0; and printf '%s\n' $positional
-end
-function __p_git_clone_dest
-  set -l positional (__p_git_non_option_args $argv)
-  test (count $positional) -gt 0; or return
-  if test (count $positional) -ge 2
-    printf '%s\n' $positional[2]
-  else
-    set -l repo $positional[1]
-    set -l dest (basename "$repo")
-    string replace -r '\.git$' '' -- "$dest"
-  end
-end
-function git
-  command git $argv
-  set -l git_status $status
-  test $git_status -eq 0; or return $git_status
-  switch "$argv[1]"
-    case init
-      set -l positional (__p_git_non_option_args $argv[2..-1])
-      if test (count $positional) -gt 0
-        __p_index_git_repo_at $positional[-1]
-      else
-        __p_index_git_repo_at "$PWD"
-      end
-    case clone
-      set -l dest (__p_git_clone_dest $argv[2..-1])
-      test -n "$dest"; and __p_index_git_repo_at "$dest"
-    case worktree
-      if test "$argv[2]" = add
-        set -l positional (__p_git_non_option_args $argv[3..-1])
-        test (count $positional) -gt 0; and __p_index_git_repo_at $positional[1]
-      end
-  end
-  return $git_status
-end
-"#;
-
-fn hook_text(shell: Shell) -> &'static str {
-    match shell {
-        Shell::Zsh => ZSH_HOOK,
-        Shell::Bash => BASH_HOOK,
-        Shell::Fish => FISH_HOOK,
-    }
-}
-
-fn hook_cmd(shell: Shell) {
-    print!("{}", hook_text(shell));
-}
-
-fn install_hook_cmd(shell: Option<Shell>) -> Result<()> {
-    let shell = shell.unwrap_or_else(detect_shell);
-    let path = hook_install_path(shell)?;
-    let hook = format!(
-        "# >>> p hook >>>\n{}\n# <<< p hook <<<\n",
-        hook_text(shell).trim_end_matches('\n')
-    );
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let existing = fs::read_to_string(&path).unwrap_or_default();
-    let updated = replace_or_append_hook(&existing, &hook);
-    fs::write(&path, updated)?;
-    println!(
-        "{} installed {} hook in {}",
-        "ok:".green().bold(),
-        shell_name(shell).bold(),
-        path.display().to_string().dimmed()
-    );
-    Ok(())
-}
-
-fn detect_shell() -> Shell {
-    let shell = env::var("SHELL").unwrap_or_default();
-    let shell_name = Path::new(&shell)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    match shell_name {
-        "bash" => Shell::Bash,
-        "fish" => Shell::Fish,
-        _ => Shell::Zsh,
-    }
-}
-
-fn hook_install_path(shell: Shell) -> Result<PathBuf> {
-    let home = directories::BaseDirs::new()
-        .context("home dir unavailable")?
-        .home_dir()
-        .to_path_buf();
-    Ok(match shell {
-        Shell::Zsh => home.join(".zshrc"),
-        Shell::Bash => home.join(".bashrc"),
-        Shell::Fish => home
-            .join(".config")
-            .join("fish")
-            .join("conf.d")
-            .join("p.fish"),
-    })
-}
-
-fn replace_or_append_hook(existing: &str, hook: &str) -> String {
-    let start = "# >>> p hook >>>";
-    let end = "# <<< p hook <<<";
-    if let Some(start_idx) = existing.find(start)
-        && let Some(relative_end_idx) = existing[start_idx..].find(end)
-    {
-        let end_idx = start_idx + relative_end_idx + end.len();
-        let mut updated = String::new();
-        updated.push_str(&existing[..start_idx]);
-        updated.push_str(hook);
-        updated.push_str(existing[end_idx..].trim_start_matches('\n'));
-        return updated;
-    }
-
-    let mut updated = existing.to_string();
-    if !updated.is_empty() && !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    if !updated.is_empty() {
-        updated.push('\n');
-    }
-    updated.push_str(hook);
-    updated
-}
-
-fn shell_name(shell: Shell) -> &'static str {
-    match shell {
-        Shell::Zsh => "zsh",
-        Shell::Bash => "bash",
-        Shell::Fish => "fish",
-    }
-}
-
-fn drop_stash_if_still_top(path: &Path, stash_hash: &str) -> Result<()> {
-    let top = git_output(path, ["rev-parse", "--verify", "-q", "stash@{0}"])?;
-    if top.trim() != stash_hash.trim() {
-        bail!("applied stash {stash_hash}, but it is no longer stash@{{0}}; leaving it in place");
-    }
-    run_git(path, ["stash", "drop", "stash@{0}"])
-}
-
-fn git_output<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .context("failed to run git")?;
-    if !output.status.success() {
-        bail!(
-            "git command failed in {}: {}",
-            cwd.display(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8(output.stdout)?.trim_end().to_string())
-}
-
-fn run_git<const N: usize>(cwd: &Path, args: [&str; N]) -> Result<()> {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .status()
-        .context("failed to run git")?;
-    if !status.success() {
-        bail!("git command failed in {}", cwd.display());
+    match sync::run(db, !background).await? {
+        Some(synced) if !quiet => sync::report(&synced),
+        Some(_) => {}
+        None if !quiet => ui::info("a sync is already running in the background"),
+        None => {}
     }
     Ok(())
 }
