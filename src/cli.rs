@@ -94,9 +94,11 @@ pub enum Commands {
         #[arg(short, long)]
         quiet: bool,
     },
+    /// Manage git worktrees (worktrunk-style); `p wt` with no subcommand lists them.
+    #[command(alias = "wt")]
     Worktree {
         #[command(subcommand)]
-        command: WorktreeCmd,
+        command: Option<WorktreeCmd>,
     },
 }
 
@@ -137,6 +139,87 @@ pub enum GithubCmd {
 
 #[derive(Subcommand)]
 pub enum WorktreeCmd {
+    /// Switch to a branch's worktree, creating the worktree if needed.
+    ///
+    /// Accepts a branch name, a worktree path, `^` (default branch), `@`
+    /// (current) or `-` (previous). With no branch, opens a fuzzy picker.
+    /// With the shell integration from `p hook-install` the shell changes
+    /// directory; otherwise a subshell opens in the worktree.
+    #[command(visible_aliases = ["sw", "s"])]
+    Switch {
+        branch: Option<String>,
+        /// Create a new branch (from --base, default: the default branch).
+        #[arg(short, long)]
+        create: bool,
+        /// Base branch for --create.
+        #[arg(short, long)]
+        base: Option<String>,
+        /// Command to run in the worktree after switching, e.g. `-x claude`.
+        #[arg(short = 'x', long)]
+        execute: Option<String>,
+        /// Print the worktree path instead of switching to it.
+        #[arg(short, long)]
+        print_path: bool,
+        /// Approve project hooks from .config/wt.toml without prompting.
+        #[arg(short, long)]
+        yes: bool,
+        /// Skip hooks.
+        #[arg(long)]
+        no_hooks: bool,
+        /// Arguments passed to the --execute command.
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
+    /// List worktrees with status, ahead/behind counts and last commit.
+    #[command(visible_alias = "ls")]
+    List {
+        #[arg(long)]
+        json: bool,
+        /// Also show local branches that have no worktree.
+        #[arg(long)]
+        branches: bool,
+    },
+    /// Remove worktrees (default: the current one) and their merged branches.
+    #[command(visible_alias = "rm")]
+    Remove {
+        branches: Vec<String>,
+        /// Remove even when the worktree has uncommitted changes.
+        #[arg(short, long)]
+        force: bool,
+        /// Delete the branch even when it isn't merged.
+        #[arg(short = 'D', long)]
+        force_delete: bool,
+        /// Keep the branch.
+        #[arg(long)]
+        no_delete_branch: bool,
+        /// Approve project hooks from .config/wt.toml without prompting.
+        #[arg(short, long)]
+        yes: bool,
+        /// Skip hooks.
+        #[arg(long)]
+        no_hooks: bool,
+    },
+    /// Squash, rebase and fast-forward the current branch into the target
+    /// (default: the default branch), then remove the worktree.
+    Merge {
+        target: Option<String>,
+        /// Keep individual commits instead of squashing.
+        #[arg(long)]
+        no_squash: bool,
+        /// Keep the worktree and branch after merging.
+        #[arg(long)]
+        no_remove: bool,
+        /// Commit message for the squashed commit.
+        #[arg(short, long)]
+        message: Option<String>,
+        /// Approve project hooks from .config/wt.toml without prompting.
+        #[arg(short, long)]
+        yes: bool,
+        /// Skip hooks.
+        #[arg(long)]
+        no_hooks: bool,
+    },
+    /// Move a linked worktree's branch (and its changes) onto the primary checkout.
     #[command(alias = "co")]
     Checkout { branch_name: String },
 }
@@ -156,5 +239,22 @@ mod tests {
                     if old_name == "old" && new_name == "new"
             ));
         }
+    }
+
+    #[test]
+    fn worktree_switch_parses_create_execute_and_trailing_args() {
+        let cli = Cli::try_parse_from(["p", "wt", "sw", "-c", "-x", "claude", "feat", "--", "go"])
+            .expect("parse switch");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Worktree {
+                command: Some(WorktreeCmd::Switch { branch: Some(b), create: true, execute: Some(x), args, .. })
+            }) if b == "feat" && x == "claude" && args == ["go"]
+        ));
+        let cli = Cli::try_parse_from(["p", "worktree"]).expect("parse bare worktree");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Worktree { command: None })
+        ));
     }
 }
